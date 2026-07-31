@@ -10,6 +10,8 @@ import subprocess
 import tempfile
 import threading
 import time
+import uuid
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
@@ -38,7 +40,7 @@ LANGS = {
     "cpp": {
         "label": "C++17",
         "src": "sol.cpp",
-        "compile": ["g++", "-O2", "-std=c++17", "-w", "-o", "sol", "sol.cpp"],
+        "compile": ["g++", "-O2", "-pipe", "-std=c++17", "-w", "-o", "sol", "sol.cpp"],
         "run": ["./sol"],
     },
     "java": {
@@ -52,8 +54,9 @@ LANGS = {
 
 def get_run_cmd(lang: str, mem_mb: int):
     if lang == "java":
-        return ["java", "-Xss64m", f"-Xmx{max(64, mem_mb)}m",
-                "-XX:+UseSerialGC", "-cp", ".", "Main"]
+        return ["java", "-XX:+UseSerialGC", "-XX:TieredStopAtLevel=1",
+                "-Xshare:auto", "-Xss64m", f"-Xmx{max(64, mem_mb)}m",
+                "-cp", ".", "Main"]
     return LANGS[lang]["run"]
 
 
@@ -111,32 +114,93 @@ def _safe_eval(expr: str, env: Dict[str, int]) -> int:
     return int(ev(node))
 
 
+def _resolve_charset(spec_str: str) -> List[str]:
+    s = spec_str if spec_str else "a-z"
+    chars: List[str] = []
+    i = 0
+    while i < len(s):
+        if i + 2 < len(s) and s[i + 1] == '-':
+            a, b = ord(s[i]), ord(s[i + 2])
+            if a > b:
+                a, b = b, a
+            chars.extend(chr(c) for c in range(a, b + 1))
+            i += 3
+        else:
+            chars.append(s[i])
+            i += 1
+    if not chars:
+        raise GenError("Empty charset")
+    return chars
+
+
+def _gen_scalar(rng: random.Random, spec: Dict[str, Any], env: Dict[str, int]):
+    """Return (string_value, int_value_or_None) for a typed scalar spec."""
+    t = spec.get("type", "int")
+    if t == "int":
+        lo = _safe_eval(str(spec.get("min", "0")), env)
+        hi = _safe_eval(str(spec.get("max", "0")), env)
+        if lo > hi:
+            raise GenError(f"int: min({lo}) > max({hi})")
+        v = rng.randint(lo, hi)
+        return str(v), v
+    if t == "float":
+        try:
+            lo = float(spec.get("min", 0))
+            hi = float(spec.get("max", 1))
+        except (TypeError, ValueError):
+            raise GenError("float min/max must be numbers")
+        if lo > hi:
+            raise GenError(f"float: min({lo}) > max({hi})")
+        dec = int(spec.get("decimals", 2))
+        dec = max(0, min(dec, 12))
+        return f"{rng.uniform(lo, hi):.{dec}f}", None
+    if t == "char":
+        cs = _resolve_charset(str(spec.get("charset", "a-z")))
+        return rng.choice(cs), None
+    if t == "string":
+        cs = _resolve_charset(str(spec.get("charset", "a-z")))
+        ln = _safe_eval(str(spec.get("len", "1")), env)
+        if ln > 200000:
+            raise GenError("string too long (>200000)")
+        return "".join(rng.choice(cs) for _ in range(max(0, ln))), None
+    raise GenError(f"Unknown type '{t}'")
+
+
 def generate_simple(cfg: Dict[str, Any], rng: random.Random) -> str:
     env: Dict[str, int] = {}
+    disp: Dict[str, str] = {}
     for v in cfg.get("variables", []):
         name = v["name"].strip()
-        lo = _safe_eval(str(v["min"]), env)
-        hi = _safe_eval(str(v["max"]), env)
-        if lo > hi:
-            raise GenError(f"Variable '{name}': min({lo}) > max({hi})")
-        env[name] = rng.randint(lo, hi)
+        if not name:
+            raise GenError("Variable name cannot be empty")
+        sval, ival = _gen_scalar(rng, v, env)
+        if ival is not None:
+            env[name] = ival
+        disp[name] = sval
 
     out_lines: List[str] = []
     for ln in cfg.get("lines", []):
         kind = ln.get("kind")
         if kind == "vars":
-            vals = [str(env[n]) if n in env else str(_safe_eval(str(n), env))
+            vals = [disp[n] if n in disp else str(_safe_eval(str(n), env))
                     for n in ln.get("vars", [])]
             out_lines.append(" ".join(vals))
         elif kind == "array":
-            count = _safe_eval(str(ln["count"]), env)
-            lo = _safe_eval(str(ln["min"]), env)
-            hi = _safe_eval(str(ln["max"]), env)
-            if lo > hi:
-                raise GenError(f"Array: min({lo}) > max({hi})")
+            count = _safe_eval(str(ln.get("count", "0")), env)
             if count > 200000:
                 raise GenError("Array too large (>200000)")
-            out_lines.append(" ".join(str(rng.randint(lo, hi)) for _ in range(max(0, count))))
+            count = max(0, count)
+            t = ln.get("type", "int")
+            if t == "int" and ln.get("distinct"):
+                lo = _safe_eval(str(ln.get("min", "0")), env)
+                hi = _safe_eval(str(ln.get("max", "0")), env)
+                if lo > hi:
+                    raise GenError(f"Array: min({lo}) > max({hi})")
+                if count > (hi - lo + 1):
+                    raise GenError(f"Distinct array needs range size >= count ({hi - lo + 1} < {count})")
+                out_lines.append(" ".join(str(x) for x in rng.sample(range(lo, hi + 1), count)))
+            else:
+                out_lines.append(" ".join(_gen_scalar(rng, ln, env)[0] for _ in range(count)))
         elif kind == "const":
             out_lines.append(str(ln.get("text", "")))
         else:
@@ -253,7 +317,8 @@ def build_generator(gen: Dict[str, Any]):
 
 
 # ----------------------------- Execution -----------------------------
-def execute(run_cmd, input_data: str, time_limit_ms: int, mem_limit_mb: int, cwd: str):
+def execute(run_cmd, input_data: str, time_limit_ms: int, mem_limit_mb: int, cwd: str,
+            cancel_event: Optional[threading.Event] = None):
     tl = time_limit_ms / 1000.0
     mem_limit_kb = mem_limit_mb * 1024
 
@@ -272,6 +337,9 @@ def execute(run_cmd, input_data: str, time_limit_ms: int, mem_limit_mb: int, cwd
     def sample():
         path = f"/proc/{proc.pid}/status"
         while not stop.is_set():
+            if cancel_event is not None and cancel_event.is_set():
+                proc.kill()
+                return
             try:
                 with open(path) as f:
                     for line in f:
@@ -285,7 +353,7 @@ def execute(run_cmd, input_data: str, time_limit_ms: int, mem_limit_mb: int, cwd
                             break
             except Exception:
                 pass
-            time.sleep(0.003)
+            time.sleep(0.004)
 
     t = threading.Thread(target=sample, daemon=True)
     t.start()
@@ -390,83 +458,133 @@ def _verdict_for(res, tl_ms, mem_mb):
     return None
 
 
-@api_router.post("/run")
-def run_stress(req: StressRequest):
-    if req.userLang not in LANGS or req.bruteLang not in LANGS:
-        raise HTTPException(status_code=400, detail="Unsupported language")
+# ----------------------------- Job manager -----------------------------
+JOBS: Dict[str, Dict[str, Any]] = {}
+JOBS_LOCK = threading.Lock()
 
+
+def _prune_jobs():
+    now = time.time()
+    with JOBS_LOCK:
+        stale = [jid for jid, j in JOBS.items() if now - j["created"] > 600]
+        for jid in stale:
+            JOBS.pop(jid, None)
+
+
+def _job_snapshot(job: Dict[str, Any]) -> Dict[str, Any]:
+    counts = job["counts"]
+    return {
+        "jobId": job["id"],
+        "status": job["status"],
+        "phase": job["phase"],
+        "total": job["total"],
+        "done": job["done"],
+        "seed": job.get("seed"),
+        "ce": job.get("ce"),
+        "message": job.get("message"),
+        "summary": {
+            "total": len(job["tests"]),
+            "passed": counts["AC"],
+            "firstFail": job.get("first_fail"),
+            "counts": counts,
+        },
+        "tests": job["tests"],
+    }
+
+
+def _run_job(job: Dict[str, Any], req: "StressRequest"):
+    cancel = job["cancel"]
     base = tempfile.mkdtemp(prefix="cpjudge_")
     user_dir = os.path.join(base, "user")
     brute_dir = os.path.join(base, "brute")
     os.makedirs(user_dir)
     os.makedirs(brute_dir)
+    pool = ThreadPoolExecutor(max_workers=2)
     try:
-        # validate generator early
         try:
             make = build_generator(req.generator)
-            probe_rng = random.Random(12345)
-            make(probe_rng)
+            make(random.Random(12345))
         except GenError as e:
-            return {"status": "GEN_ERROR", "message": str(e)}
+            job["status"] = "GEN_ERROR"
+            job["message"] = str(e)
+            job["phase"] = "done"
+            return
 
+        job["phase"] = "compiling"
         ok, msg = compile_source(req.userLang, req.userCode, user_dir)
         if not ok:
-            return {"status": "CE", "ce": {"target": "user", "message": _truncate(msg)}}
+            job["status"] = "CE"
+            job["ce"] = {"target": "user", "message": _truncate(msg)}
+            job["phase"] = "done"
+            return
         ok, msg = compile_source(req.bruteLang, req.bruteCode, brute_dir)
         if not ok:
-            return {"status": "CE", "ce": {"target": "brute", "message": _truncate(msg)}}
+            job["status"] = "CE"
+            job["ce"] = {"target": "brute", "message": _truncate(msg)}
+            job["phase"] = "done"
+            return
 
+        if cancel.is_set():
+            job["status"] = "cancelled"
+            job["phase"] = "done"
+            return
+
+        job["phase"] = "running"
         user_run = get_run_cmd(req.userLang, req.memLimitMb)
         brute_run = get_run_cmd(req.bruteLang, req.memLimitMb + 256)
 
         base_seed = req.seed if req.seed is not None else random.randrange(1 << 30)
+        job["seed"] = base_seed
         rng = random.Random(base_seed)
-
-        tests = []
-        counts = {"AC": 0, "WA": 0, "TLE": 0, "RTE": 0, "MLE": 0, "ERR": 0}
-        first_fail = None
-        deadline = time.monotonic() + 100  # global safety budget (seconds)
+        ref_tl = max(req.timeLimitMs * 3, 5000)
+        deadline = time.monotonic() + 110
 
         for i in range(req.numTests):
-            if time.monotonic() > deadline:
-                tests.append({"index": i + 1, "verdict": "ERR", "time_ms": 0,
-                              "mem_kb": 0, "note": "Global time budget exceeded; stopped early.",
-                              "input": "", "expected": "", "output": ""})
-                counts["ERR"] += 1
+            if cancel.is_set() or time.monotonic() > deadline:
                 break
 
             test_seed = rng.randrange(1 << 30)
             try:
                 inp = make(random.Random(test_seed))
             except GenError as e:
-                return {"status": "GEN_ERROR", "message": str(e)}
+                job["status"] = "GEN_ERROR"
+                job["message"] = str(e)
+                job["phase"] = "done"
+                return
 
-            # reference solution with generous limits
-            ref_tl = max(req.timeLimitMs * 3, 5000)
-            ref = execute(brute_run, inp, ref_tl, req.memLimitMb + 256, brute_dir)
+            # run reference and user solution concurrently
+            f_ref = pool.submit(execute, brute_run, inp, ref_tl,
+                                req.memLimitMb + 256, brute_dir, cancel)
+            f_usr = pool.submit(execute, user_run, inp, req.timeLimitMs,
+                                req.memLimitMb, user_dir, cancel)
+            ref = f_ref.result()
+            res = f_usr.result()
+
+            if cancel.is_set():
+                break
+
             if ref["timed_out"] or ref["rc"] != 0:
-                verdict = "ERR"
-                note = f"Reference (correct) solution failed: {'timeout' if ref['timed_out'] else 'runtime error rc=' + str(ref['rc'])}"
-                counts["ERR"] += 1
-                tests.append({"index": i + 1, "verdict": verdict, "time_ms": ref["time_ms"],
-                              "mem_kb": 0, "note": note, "input": _truncate(inp),
-                              "expected": "", "output": _truncate(ref["stderr"])})
-                if first_fail is None:
-                    first_fail = i + 1
+                note = "Reference (correct) solution failed: " + (
+                    "timeout" if ref["timed_out"] else f"runtime error rc={ref['rc']}")
+                job["counts"]["ERR"] += 1
+                job["tests"].append({
+                    "index": i + 1, "verdict": "ERR", "time_ms": ref["time_ms"],
+                    "mem_kb": 0, "note": note, "input": _truncate(inp),
+                    "expected": "", "output": _truncate(ref["stderr"]),
+                })
+                if job["first_fail"] is None:
+                    job["first_fail"] = i + 1
+                job["done"] = i + 1
                 if req.stopOnFirstFail:
                     break
                 continue
 
             expected = ref["stdout"]
-            res = execute(user_run, inp, req.timeLimitMs, req.memLimitMb, user_dir)
             verdict = _verdict_for(res, req.timeLimitMs, req.memLimitMb)
             if verdict is None:
-                if normalize_tokens(res["stdout"]) == normalize_tokens(expected):
-                    verdict = "AC"
-                else:
-                    verdict = "WA"
+                verdict = "AC" if normalize_tokens(res["stdout"]) == normalize_tokens(expected) else "WA"
 
-            counts[verdict] = counts.get(verdict, 0) + 1
+            job["counts"][verdict] = job["counts"].get(verdict, 0) + 1
             entry = {"index": i + 1, "verdict": verdict, "time_ms": res["time_ms"],
                      "mem_kb": res["mem_kb"], "seed": test_seed}
             if verdict != "AC":
@@ -475,24 +593,81 @@ def run_stress(req: StressRequest):
                 entry["output"] = _truncate(res["stdout"])
                 if res["stderr"]:
                     entry["stderr"] = _truncate(res["stderr"])
-                if first_fail is None:
-                    first_fail = i + 1
-            tests.append(entry)
+                if job["first_fail"] is None:
+                    job["first_fail"] = i + 1
+            job["tests"].append(entry)
+            job["done"] = i + 1
 
             if verdict != "AC" and req.stopOnFirstFail:
                 break
 
-        total = len(tests)
-        passed = counts["AC"]
-        return {
-            "status": "completed",
-            "seed": base_seed,
-            "summary": {"total": total, "passed": passed, "firstFail": first_fail,
-                        "counts": counts},
-            "tests": tests,
-        }
+        job["status"] = "cancelled" if cancel.is_set() else "completed"
+        job["phase"] = "done"
+    except Exception as e:
+        logger.exception("job failed")
+        job["status"] = "error"
+        job["message"] = f"{type(e).__name__}: {e}"
+        job["phase"] = "done"
     finally:
+        pool.shutdown(wait=False, cancel_futures=True)
         shutil.rmtree(base, ignore_errors=True)
+
+
+@api_router.post("/run/start")
+def run_start(req: StressRequest):
+    if req.userLang not in LANGS or req.bruteLang not in LANGS:
+        raise HTTPException(status_code=400, detail="Unsupported language")
+    _prune_jobs()
+    job_id = uuid.uuid4().hex
+    job = {
+        "id": job_id, "status": "running", "phase": "queued",
+        "total": req.numTests, "done": 0, "tests": [],
+        "counts": {"AC": 0, "WA": 0, "TLE": 0, "RTE": 0, "MLE": 0, "ERR": 0},
+        "first_fail": None, "cancel": threading.Event(),
+        "created": time.time(),
+    }
+    with JOBS_LOCK:
+        JOBS[job_id] = job
+    threading.Thread(target=_run_job, args=(job, req), daemon=True).start()
+    return {"jobId": job_id, "total": req.numTests}
+
+
+@api_router.get("/run/status/{job_id}")
+def run_status(job_id: str):
+    with JOBS_LOCK:
+        job = JOBS.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return _job_snapshot(job)
+
+
+@api_router.post("/run/cancel/{job_id}")
+def run_cancel(job_id: str):
+    with JOBS_LOCK:
+        job = JOBS.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    job["cancel"].set()
+    return {"ok": True}
+
+
+@api_router.post("/run")
+def run_stress(req: StressRequest):
+    """Synchronous run (used for direct API/testing)."""
+    if req.userLang not in LANGS or req.bruteLang not in LANGS:
+        raise HTTPException(status_code=400, detail="Unsupported language")
+    job = {
+        "id": "sync", "status": "running", "phase": "queued",
+        "total": req.numTests, "done": 0, "tests": [],
+        "counts": {"AC": 0, "WA": 0, "TLE": 0, "RTE": 0, "MLE": 0, "ERR": 0},
+        "first_fail": None, "cancel": threading.Event(), "created": time.time(),
+    }
+    _run_job(job, req)
+    snap = _job_snapshot(job)
+    if job["status"] in ("CE", "GEN_ERROR", "error"):
+        return {"status": job["status"], "ce": job.get("ce"), "message": job.get("message")}
+    return {"status": "completed", "seed": job.get("seed"),
+            "summary": snap["summary"], "tests": snap["tests"]}
 
 
 app.include_router(api_router)

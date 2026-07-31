@@ -1,15 +1,15 @@
-import React, { useState } from "react";
+import React, { useState, useRef } from "react";
 import { CodeEditor } from "../components/CodeEditor";
 import { GeneratorPanel } from "../components/GeneratorPanel";
 import { ResultsPanel } from "../components/ResultsPanel";
-import { runStress } from "../lib/apiClient";
+import { startRun, getRunStatus, cancelRun } from "../lib/apiClient";
 import {
   DEFAULT_USER_CPP,
   DEFAULT_BRUTE_CPP,
   DEFAULT_SIMPLE,
   DEFAULT_ADVANCED_TEMPLATE,
 } from "../lib/constants";
-import { Play, Lightning, CircleNotch } from "@phosphor-icons/react";
+import { Play, Lightning, StopCircle } from "@phosphor-icons/react";
 import { toast } from "sonner";
 
 const cfgInput =
@@ -33,16 +33,53 @@ export default function StressTester() {
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState(null);
   const [ceError, setCeError] = useState(null);
+  const [progress, setProgress] = useState({ done: 0, total: 0, phase: "" });
+  const jobRef = useRef(null);
+  const pollRef = useRef(null);
+  const cancelledRef = useRef(false);
 
   const generator = () =>
     mode === "simple" ? { ...simpleCfg, mode: "simple" } : { mode: "advanced", template };
+
+  const poll = async () => {
+    try {
+      const s = await getRunStatus(jobRef.current);
+      setProgress({ done: s.done, total: s.total, phase: s.phase });
+      if (s.status === "running") {
+        setResult({ status: "running", summary: s.summary, tests: s.tests });
+        pollRef.current = setTimeout(poll, 300);
+        return;
+      }
+      // terminal states
+      if (s.status === "CE") {
+        setCeError(s.ce);
+        toast.error("Compilation Error", { description: `${s.ce.target} solution failed to compile` });
+      } else if (s.status === "GEN_ERROR" || s.status === "error") {
+        setResult({ status: s.status, message: s.message });
+        toast.error("Error", { description: s.message });
+      } else if (s.status === "cancelled") {
+        setResult({ status: "cancelled", summary: s.summary, tests: s.tests });
+        toast("Run cancelled", { description: `Stopped after ${s.done} test(s)` });
+      } else {
+        setResult({ status: "completed", summary: s.summary, tests: s.tests });
+        if (s.summary.firstFail === null) toast.success(`All ${s.summary.total} tests passed`);
+        else toast.error(`Failed at test #${s.summary.firstFail}`, { description: "Counterexample found" });
+      }
+      setRunning(false);
+    } catch (e) {
+      setRunning(false);
+      toast.error("Run failed", { description: e?.message || "Server error" });
+    }
+  };
 
   const onRun = async () => {
     setRunning(true);
     setResult(null);
     setCeError(null);
+    cancelledRef.current = false;
+    setProgress({ done: 0, total: Number(numTests), phase: "queued" });
     try {
-      const data = await runStress({
+      const { jobId } = await startRun({
         userCode,
         userLang,
         bruteCode,
@@ -53,25 +90,21 @@ export default function StressTester() {
         memLimitMb: Number(memLimitMb),
         stopOnFirstFail,
       });
-      if (data.status === "CE") {
-        setCeError(data.ce);
-        toast.error("Compilation Error", { description: `${data.ce.target} solution failed to compile` });
-      } else {
-        setResult(data);
-        if (data.status === "completed") {
-          if (data.summary.firstFail === null) {
-            toast.success(`All ${data.summary.total} tests passed`);
-          } else {
-            toast.error(`Failed at test #${data.summary.firstFail}`, {
-              description: "Counterexample found",
-            });
-          }
-        }
-      }
+      jobRef.current = jobId;
+      poll();
     } catch (e) {
-      toast.error("Run failed", { description: e?.message || "Server error" });
-    } finally {
       setRunning(false);
+      toast.error("Run failed", { description: e?.message || "Server error" });
+    }
+  };
+
+  const onCancel = async () => {
+    if (!jobRef.current) return;
+    cancelledRef.current = true;
+    try {
+      await cancelRun(jobRef.current);
+    } catch (e) {
+      /* ignore */
     }
   };
 
@@ -92,15 +125,25 @@ export default function StressTester() {
             </p>
           </div>
         </div>
-        <button
-          data-testid="run-stress-test-btn"
-          onClick={onRun}
-          disabled={running}
-          className="flex items-center gap-2 bg-[#007AFF] hover:bg-white hover:text-[#050505] text-white font-display font-bold uppercase tracking-widest text-xs px-5 h-9 rounded-sm transition-colors active:scale-[0.98] disabled:opacity-50 disabled:hover:bg-[#007AFF] disabled:hover:text-white"
-        >
-          {running ? <CircleNotch size={16} className="animate-spin" /> : <Play size={16} weight="fill" />}
-          {running ? "Running" : "Run Stress Test"}
-        </button>
+        {running ? (
+          <button
+            data-testid="cancel-stress-test-btn"
+            onClick={onCancel}
+            className="flex items-center gap-2 bg-[#FF3B30] hover:bg-white hover:text-[#050505] text-white font-display font-bold uppercase tracking-widest text-xs px-5 h-9 rounded-sm transition-colors active:scale-[0.98]"
+          >
+            <StopCircle size={16} weight="fill" />
+            Cancel {progress.total ? `(${progress.done}/${progress.total})` : ""}
+          </button>
+        ) : (
+          <button
+            data-testid="run-stress-test-btn"
+            onClick={onRun}
+            className="flex items-center gap-2 bg-[#007AFF] hover:bg-white hover:text-[#050505] text-white font-display font-bold uppercase tracking-widest text-xs px-5 h-9 rounded-sm transition-colors active:scale-[0.98]"
+          >
+            <Play size={16} weight="fill" />
+            Run Stress Test
+          </button>
+        )}
       </header>
 
       {/* Body grid */}
@@ -165,7 +208,7 @@ export default function StressTester() {
 
         {/* Right: results */}
         <div className="md:col-span-4 bg-[#050505] min-h-0 overflow-hidden">
-          <ResultsPanel result={result} running={running} ceError={ceError} />
+          <ResultsPanel result={result} running={running} ceError={ceError} progress={progress} />
         </div>
       </div>
     </div>

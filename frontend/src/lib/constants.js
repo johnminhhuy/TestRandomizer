@@ -37,10 +37,10 @@ int main(){
 
 export const DEFAULT_SIMPLE = {
   mode: "simple",
-  variables: [{ name: "n", min: "1", max: "8" }],
+  variables: [{ name: "n", type: "int", min: "1", max: "8" }],
   lines: [
     { kind: "vars", vars: ["n"] },
-    { kind: "array", count: "n", min: "1", max: "20" },
+    { kind: "array", count: "n", type: "int", min: "1", max: "20", distinct: false },
   ],
 };
 

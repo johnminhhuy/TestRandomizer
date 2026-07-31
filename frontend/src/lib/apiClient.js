@@ -14,3 +14,18 @@ export const runStress = async (payload) => {
   const { data } = await api.post("/run", payload);
   return data;
 };
+
+export const startRun = async (payload) => {
+  const { data } = await api.post("/run/start", payload);
+  return data;
+};
+
+export const getRunStatus = async (jobId) => {
+  const { data } = await api.get(`/run/status/${jobId}`);
+  return data;
+};
+
+export const cancelRun = async (jobId) => {
+  const { data } = await api.post(`/run/cancel/${jobId}`);
+  return data;
+};

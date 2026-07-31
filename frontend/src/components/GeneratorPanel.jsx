@@ -1,18 +1,68 @@
 import React, { useState } from "react";
-import { Plus, Trash, Eye, Sparkle } from "@phosphor-icons/react";
+import { Plus, Trash, Eye } from "@phosphor-icons/react";
 import { previewGenerator } from "../lib/apiClient";
 import { toast } from "sonner";
 
 const inputCls =
-  "bg-[#1E1E1E] border border-[#262626] text-white text-xs font-mono px-2 py-1.5 rounded-sm outline-none focus:ring-2 focus:ring-[#007AFF] w-full";
+  "bg-[#1E1E1E] border border-[#262626] text-white text-xs font-mono px-2 py-1.5 rounded-sm outline-none focus:ring-2 focus:ring-[#007AFF]";
+
+const TYPES = [
+  { id: "int", label: "int" },
+  { id: "float", label: "float" },
+  { id: "char", label: "char" },
+  { id: "string", label: "string" },
+];
+
+const TypeSelect = ({ value, onChange, testid }) => (
+  <select
+    data-testid={testid}
+    value={value || "int"}
+    onChange={(e) => onChange(e.target.value)}
+    className="bg-[#1E1E1E] border border-[#262626] text-[#EAB308] text-[10px] font-mono px-1.5 py-1 rounded-sm outline-none focus:ring-2 focus:ring-[#007AFF] cursor-pointer uppercase"
+  >
+    {TYPES.map((t) => (
+      <option key={t.id} value={t.id}>{t.label}</option>
+    ))}
+  </select>
+);
+
+// Renders the constraint inputs for a typed spec (used by both vars and arrays)
+const Constraints = ({ spec, patch, prefix }) => {
+  const t = spec.type || "int";
+  if (t === "int" || t === "float") {
+    return (
+      <>
+        <span className="text-[#525252] text-xs">[</span>
+        <input data-testid={`${prefix}-min`} className={inputCls + " w-16"} value={spec.min ?? ""} onChange={(e) => patch({ min: e.target.value })} placeholder="min" />
+        <input data-testid={`${prefix}-max`} className={inputCls + " w-16"} value={spec.max ?? ""} onChange={(e) => patch({ max: e.target.value })} placeholder="max" />
+        <span className="text-[#525252] text-xs">]</span>
+        {t === "float" && (
+          <input data-testid={`${prefix}-decimals`} className={inputCls + " w-14"} value={spec.decimals ?? "2"} onChange={(e) => patch({ decimals: e.target.value })} placeholder="dec" title="decimals" />
+        )}
+      </>
+    );
+  }
+  if (t === "char") {
+    return (
+      <input data-testid={`${prefix}-charset`} className={inputCls + " w-full"} value={spec.charset ?? "a-z"} onChange={(e) => patch({ charset: e.target.value })} placeholder="charset e.g. a-z" />
+    );
+  }
+  // string
+  return (
+    <>
+      <input data-testid={`${prefix}-charset`} className={inputCls + " flex-1 min-w-[120px]"} value={spec.charset ?? "a-z"} onChange={(e) => patch({ charset: e.target.value })} placeholder="charset e.g. a-z" />
+      <input data-testid={`${prefix}-len`} className={inputCls + " w-20"} value={spec.len ?? "5"} onChange={(e) => patch({ len: e.target.value })} placeholder="len" />
+    </>
+  );
+};
 
 const SimpleBuilder = ({ cfg, setCfg }) => {
-  const updateVar = (i, key, val) => {
-    const variables = cfg.variables.map((v, idx) => (idx === i ? { ...v, [key]: val } : v));
+  const updateVar = (i, patch) => {
+    const variables = cfg.variables.map((v, idx) => (idx === i ? { ...v, ...patch } : v));
     setCfg({ ...cfg, variables });
   };
   const addVar = () =>
-    setCfg({ ...cfg, variables: [...cfg.variables, { name: "x", min: "1", max: "100" }] });
+    setCfg({ ...cfg, variables: [...cfg.variables, { name: "x", type: "int", min: "1", max: "100" }] });
   const removeVar = (i) =>
     setCfg({ ...cfg, variables: cfg.variables.filter((_, idx) => idx !== i) });
 
@@ -25,7 +75,7 @@ const SimpleBuilder = ({ cfg, setCfg }) => {
       kind === "vars"
         ? { kind: "vars", vars: cfg.variables[0] ? [cfg.variables[0].name] : [] }
         : kind === "array"
-        ? { kind: "array", count: cfg.variables[0]?.name || "5", min: "1", max: "100" }
+        ? { kind: "array", count: cfg.variables[0]?.name || "5", type: "int", min: "1", max: "100", distinct: false }
         : { kind: "const", text: "" };
     setCfg({ ...cfg, lines: [...cfg.lines, base] });
   };
@@ -39,42 +89,28 @@ const SimpleBuilder = ({ cfg, setCfg }) => {
         </p>
         <div className="space-y-2">
           {cfg.variables.map((v, i) => (
-            <div key={i} className="flex items-center gap-1.5" data-testid={`var-row-${i}`}>
-              <input
-                className={inputCls + " w-16"}
-                value={v.name}
-                onChange={(e) => updateVar(i, "name", e.target.value)}
-                placeholder="name"
-              />
-              <span className="text-[#525252] text-xs">∈ [</span>
-              <input
-                className={inputCls + " w-16"}
-                value={v.min}
-                onChange={(e) => updateVar(i, "min", e.target.value)}
-                placeholder="min"
-              />
-              <input
-                className={inputCls + " w-16"}
-                value={v.max}
-                onChange={(e) => updateVar(i, "max", e.target.value)}
-                placeholder="max"
-              />
-              <span className="text-[#525252] text-xs">]</span>
-              <button
-                data-testid={`remove-var-${i}`}
-                onClick={() => removeVar(i)}
-                className="text-[#525252] hover:text-[#EF4444] p-1"
-              >
-                <Trash size={14} />
-              </button>
+            <div key={i} className="border border-[#262626] rounded-sm p-2 bg-[#0c0c0c] space-y-1.5" data-testid={`var-row-${i}`}>
+              <div className="flex items-center gap-1.5">
+                <input
+                  className={inputCls + " w-20"}
+                  value={v.name}
+                  onChange={(e) => updateVar(i, { name: e.target.value })}
+                  placeholder="name"
+                  data-testid={`var-name-${i}`}
+                />
+                <TypeSelect testid={`var-type-${i}`} value={v.type} onChange={(val) => updateVar(i, { type: val })} />
+                <div className="flex-1" />
+                <button data-testid={`remove-var-${i}`} onClick={() => removeVar(i)} className="text-[#525252] hover:text-[#EF4444] p-1">
+                  <Trash size={14} />
+                </button>
+              </div>
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <Constraints spec={v} prefix={`var-${i}`} patch={(p) => updateVar(i, p)} />
+              </div>
             </div>
           ))}
         </div>
-        <button
-          data-testid="add-var-btn"
-          onClick={addVar}
-          className="mt-2 flex items-center gap-1 text-[11px] text-[#007AFF] hover:text-white"
-        >
+        <button data-testid="add-var-btn" onClick={addVar} className="mt-2 flex items-center gap-1 text-[11px] text-[#007AFF] hover:text-white">
           <Plus size={12} /> add variable
         </button>
       </div>
@@ -85,54 +121,48 @@ const SimpleBuilder = ({ cfg, setCfg }) => {
         </p>
         <div className="space-y-2">
           {cfg.lines.map((l, i) => (
-            <div
-              key={i}
-              className="border border-[#262626] rounded-sm p-2 bg-[#0c0c0c]"
-              data-testid={`line-row-${i}`}
-            >
+            <div key={i} className="border border-[#262626] rounded-sm p-2 bg-[#0c0c0c]" data-testid={`line-row-${i}`}>
               <div className="flex items-center justify-between mb-1.5">
                 <span className="font-mono text-[10px] uppercase text-[#EAB308]">{l.kind}</span>
-                <button
-                  data-testid={`remove-line-${i}`}
-                  onClick={() => removeLine(i)}
-                  className="text-[#525252] hover:text-[#EF4444]"
-                >
+                <button data-testid={`remove-line-${i}`} onClick={() => removeLine(i)} className="text-[#525252] hover:text-[#EF4444]">
                   <Trash size={13} />
                 </button>
               </div>
               {l.kind === "vars" && (
                 <input
-                  className={inputCls}
+                  className={inputCls + " w-full"}
                   value={l.vars.join(", ")}
-                  onChange={(e) =>
-                    updateLine(i, { vars: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) })
-                  }
+                  onChange={(e) => updateLine(i, { vars: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) })}
                   placeholder="n, m"
                 />
               )}
               {l.kind === "array" && (
-                <div className="flex items-center gap-1.5">
-                  <input className={inputCls + " w-20"} value={l.count} onChange={(e) => updateLine(i, { count: e.target.value })} placeholder="count" />
-                  <span className="text-[#525252] text-xs">×[</span>
-                  <input className={inputCls + " w-16"} value={l.min} onChange={(e) => updateLine(i, { min: e.target.value })} placeholder="min" />
-                  <input className={inputCls + " w-16"} value={l.max} onChange={(e) => updateLine(i, { max: e.target.value })} placeholder="max" />
-                  <span className="text-[#525252] text-xs">]</span>
+                <div className="space-y-1.5">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[10px] text-[#525252] uppercase">count</span>
+                    <input className={inputCls + " w-24"} value={l.count} onChange={(e) => updateLine(i, { count: e.target.value })} placeholder="count" data-testid={`line-${i}-count`} />
+                    <TypeSelect testid={`line-type-${i}`} value={l.type} onChange={(val) => updateLine(i, { type: val })} />
+                  </div>
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <Constraints spec={l} prefix={`line-${i}`} patch={(p) => updateLine(i, p)} />
+                  </div>
+                  {(l.type || "int") === "int" && (
+                    <label className="flex items-center gap-1.5 cursor-pointer" data-testid={`line-${i}-distinct`}>
+                      <input type="checkbox" checked={!!l.distinct} onChange={(e) => updateLine(i, { distinct: e.target.checked })} className="accent-[#007AFF] w-3 h-3" />
+                      <span className="text-[10px] text-[#A3A3A3]">distinct values</span>
+                    </label>
+                  )}
                 </div>
               )}
               {l.kind === "const" && (
-                <input className={inputCls} value={l.text} onChange={(e) => updateLine(i, { text: e.target.value })} placeholder="literal text" />
+                <input className={inputCls + " w-full"} value={l.text} onChange={(e) => updateLine(i, { text: e.target.value })} placeholder="literal text" />
               )}
             </div>
           ))}
         </div>
         <div className="mt-2 flex gap-2">
           {["vars", "array", "const"].map((k) => (
-            <button
-              key={k}
-              data-testid={`add-line-${k}`}
-              onClick={() => addLine(k)}
-              className="flex items-center gap-1 text-[11px] text-[#007AFF] hover:text-white"
-            >
+            <button key={k} data-testid={`add-line-${k}`} onClick={() => addLine(k)} className="flex items-center gap-1 text-[11px] text-[#007AFF] hover:text-white">
               <Plus size={12} /> {k}
             </button>
           ))}

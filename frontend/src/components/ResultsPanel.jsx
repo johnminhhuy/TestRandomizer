@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { VERDICTS } from "../lib/constants";
-import { Warning, CheckCircle, Cpu, Clock } from "@phosphor-icons/react";
+import { Warning, CheckCircle, Cpu, Clock, CircleNotch, StopCircle } from "@phosphor-icons/react";
 
 const Badge = ({ v, size = "sm" }) => {
   const info = VERDICTS[v] || VERDICTS.ERR;
@@ -96,10 +96,8 @@ const EmptyState = ({ running }) => (
   </div>
 );
 
-export const ResultsPanel = ({ result, running, ceError }) => {
+export const ResultsPanel = ({ result, running, ceError, progress }) => {
   const [openIdx, setOpenIdx] = useState(null);
-
-  if (running && !result) return <EmptyState running />;
 
   if (ceError) {
     return (
@@ -117,14 +115,14 @@ export const ResultsPanel = ({ result, running, ceError }) => {
     );
   }
 
-  if (!result) return <EmptyState running={false} />;
-
-  if (result.status === "GEN_ERROR") {
+  if (result && (result.status === "GEN_ERROR" || result.status === "error")) {
     return (
       <div className="p-4" data-testid="gen-error">
         <div className="flex items-center gap-2 mb-3">
           <Warning size={20} className="text-[#EF4444]" />
-          <span className="text-sm text-white font-display uppercase tracking-widest">Generator Error</span>
+          <span className="text-sm text-white font-display uppercase tracking-widest">
+            {result.status === "GEN_ERROR" ? "Generator Error" : "Error"}
+          </span>
         </div>
         <pre className="bg-[#0c0c0c] border border-[#EF4444]/40 rounded-sm p-3 text-xs font-mono text-[#EF4444] whitespace-pre-wrap">
           {result.message}
@@ -133,32 +131,78 @@ export const ResultsPanel = ({ result, running, ceError }) => {
     );
   }
 
+  if (!result) return <EmptyState running={running} />;
+
+  const isRunning = running || result.status === "running";
   const { summary, tests } = result;
   const allPass = summary.firstFail === null;
+  const pct = progress && progress.total ? Math.round((progress.done / progress.total) * 100) : 0;
+  const phaseLabel =
+    progress?.phase === "compiling"
+      ? "Compiling solutions..."
+      : progress?.phase === "running"
+      ? `Running test ${progress.done}/${progress.total}`
+      : progress?.phase === "queued"
+      ? "Starting..."
+      : "";
 
   return (
     <div className="flex flex-col h-full min-h-0" data-testid="results-panel">
       <div className="p-4 border-b border-[#262626] shrink-0">
-        <div className="flex items-center gap-2 mb-3">
-          {allPass ? (
-            <CheckCircle size={20} weight="fill" className="text-[#22C55E]" />
-          ) : (
-            <Warning size={20} weight="fill" className="text-[#EF4444]" />
-          )}
-          <span className="text-sm font-display uppercase tracking-widest text-white">
-            {allPass ? `All ${summary.total} tests passed` : `Failed at test #${summary.firstFail}`}
-          </span>
-        </div>
-        <div className="flex flex-wrap gap-1.5" data-testid="summary-counts">
-          {Object.entries(summary.counts)
-            .filter(([, c]) => c > 0)
-            .map(([v, c]) => (
-              <div key={v} className="flex items-center gap-1">
-                <Badge v={v} />
-                <span className="text-xs font-mono text-[#A3A3A3]">{c}</span>
-              </div>
-            ))}
-        </div>
+        {isRunning ? (
+          <div data-testid="run-progress">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-sm font-display uppercase tracking-widest text-white flex items-center gap-2">
+                <CircleNotch size={16} className="animate-spin text-[#007AFF]" />
+                {phaseLabel}
+              </span>
+              <span className="font-mono text-xs text-[#A3A3A3]">{pct}%</span>
+            </div>
+            <div className="h-1.5 bg-[#1E1E1E] rounded-full overflow-hidden">
+              <div
+                className="h-full bg-[#007AFF] transition-all duration-300"
+                style={{ width: `${progress?.phase === "compiling" ? 8 : pct}%` }}
+              />
+            </div>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2 mb-3">
+            {result.status === "cancelled" ? (
+              <>
+                <StopCircle size={20} weight="fill" className="text-[#A3A3A3]" />
+                <span className="text-sm font-display uppercase tracking-widest text-white">
+                  Cancelled · {summary.total} test(s) run
+                </span>
+              </>
+            ) : allPass ? (
+              <>
+                <CheckCircle size={20} weight="fill" className="text-[#22C55E]" />
+                <span className="text-sm font-display uppercase tracking-widest text-white">
+                  All {summary.total} tests passed
+                </span>
+              </>
+            ) : (
+              <>
+                <Warning size={20} weight="fill" className="text-[#EF4444]" />
+                <span className="text-sm font-display uppercase tracking-widest text-white">
+                  Failed at test #{summary.firstFail}
+                </span>
+              </>
+            )}
+          </div>
+        )}
+        {tests.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 mt-3" data-testid="summary-counts">
+            {Object.entries(summary.counts)
+              .filter(([, c]) => c > 0)
+              .map(([v, c]) => (
+                <div key={v} className="flex items-center gap-1">
+                  <Badge v={v} />
+                  <span className="text-xs font-mono text-[#A3A3A3]">{c}</span>
+                </div>
+              ))}
+          </div>
+        )}
       </div>
 
       <div className="flex-1 min-h-0 overflow-y-auto" data-testid="test-list">
