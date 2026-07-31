@@ -537,7 +537,9 @@ def _run_job(job: Dict[str, Any], req: "StressRequest"):
         job["seed"] = base_seed
         rng = random.Random(base_seed)
         ref_tl = max(req.timeLimitMs * 3, 5000)
-        deadline = time.monotonic() + 110
+        # generous budget derived from config (jobs run in a background thread)
+        budget_s = req.numTests * (req.timeLimitMs / 1000.0 * 2 + 0.5) + 30
+        deadline = time.monotonic() + budget_s
 
         for i in range(req.numTests):
             if cancel.is_set() or time.monotonic() > deadline:
