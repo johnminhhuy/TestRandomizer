@@ -4,6 +4,7 @@ from starlette.middleware.cors import CORSMiddleware
 import os
 import logging
 import ast
+import json
 import random
 import shutil
 import subprocess
@@ -27,6 +28,52 @@ logging.basicConfig(level=logging.INFO,
 logger = logging.getLogger(__name__)
 
 MAX_STORE = 8000  # max chars stored per test io for display
+
+# ----------------------------- Groq (AI) client -----------------------------
+from openai import OpenAI  # noqa: E402
+
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
+GROQ_MODEL = os.environ.get("GROQ_MODEL", "openai/gpt-oss-120b")
+_groq_client = None
+
+
+def get_groq():
+    global _groq_client
+    if not GROQ_API_KEY:
+        raise HTTPException(status_code=503, detail="AI is not configured (missing GROQ_API_KEY).")
+    if _groq_client is None:
+        _groq_client = OpenAI(api_key=GROQ_API_KEY,
+                              base_url="https://api.groq.com/openai/v1",
+                              timeout=60.0, max_retries=1)
+    return _groq_client
+
+
+def groq_json(system: str, user: str, max_tokens: int = 4096) -> Dict[str, Any]:
+    """Call Groq expecting a single JSON object back, with one repair retry."""
+    client = get_groq()
+    messages = [{"role": "system", "content": system},
+                {"role": "user", "content": user}]
+    last_err = ""
+    for attempt in range(2):
+        try:
+            comp = client.chat.completions.create(
+                model=GROQ_MODEL, messages=messages, temperature=0.2,
+                max_completion_tokens=max_tokens,
+                response_format={"type": "json_object"},
+            )
+            raw = comp.choices[0].message.content or ""
+            try:
+                return json.loads(raw)
+            except json.JSONDecodeError:
+                last_err = "invalid JSON"
+                messages.append({"role": "assistant", "content": raw})
+                messages.append({"role": "user",
+                                 "content": "Your previous reply was not valid JSON. Reply again with ONLY a single valid JSON object, no markdown, no prose."})
+        except Exception as e:
+            last_err = f"{type(e).__name__}: {e}"
+            break
+    raise HTTPException(status_code=502, detail=f"AI request failed: {last_err}")
+
 
 
 # ----------------------------- Language config -----------------------------
@@ -670,6 +717,107 @@ def run_stress(req: StressRequest):
         return {"status": job["status"], "ce": job.get("ce"), "message": job.get("message")}
     return {"status": "completed", "seed": job.get("seed"),
             "summary": snap["summary"], "tests": snap["tests"]}
+
+
+# ----------------------------- AI (Groq) endpoints -----------------------------
+DSL_SPEC = """The generator uses this line-based DSL (INTEGERS ONLY):
+- `name = int(lo, hi)` : assign a random integer in [lo, hi] to a variable. lo/hi may be integer arithmetic expressions using previously defined variables and + - * // % ** (e.g. `m = int(1, n-1)`).
+- `print(expr, expr, ...)` : print the given values space-separated on one line.
+- `array(count, lo, hi)` : print `count` random integers in [lo, hi] space-separated on one line.
+- `grid(rows, cols, lo, hi)` : print `rows` lines, each with `cols` random integers in [lo, hi]. Great for matrices or edge lists (e.g. `grid(m, 2, 1, n)` prints m edges "u v").
+- `blank` : print an empty line.
+- `# comment` : ignored.
+Rules: variables must be defined before use. There are NO loops and NO strings/chars/floats. Keep sizes SMALL (e.g. n up to ~10-50, small value ranges) so counterexamples are tiny and easy to debug. The output MUST match the problem's input format exactly (order of lines/values)."""
+
+SOLUTION_SYSTEM = """You are a world-class competitive programming expert. You write a REFERENCE solution that is used purely as a CORRECTNESS ORACLE for stress testing another solution.
+Absolute rules:
+- Read ONLY from standard input and write ONLY to standard output, matching the described input/output format EXACTLY.
+- Correctness is the ONLY priority. Prefer the simplest, most obviously-correct approach (brute force is welcome) over clever or fast code.
+- Print exactly the required output and NOTHING else: no prompts, no debug lines, no trailing text.
+- C++: `#include <bits/stdc++.h>`, standard iostream/scanf I/O, C++17.
+- Java: the public class MUST be named exactly `Main`.
+- Python: use input()/sys.stdin.
+- Handle edge cases (empty, single element, max/min bounds) correctly.
+Return ONLY a single JSON object: {"code": "<full source code as a string>", "explanation": "<1-3 sentence summary>"}. No markdown fences inside code."""
+
+EXPLAIN_SYSTEM = """You are a sharp competitive programming mentor. You are given a problem (optional), a FAILING test case (the input, the correct expected output, and the user's WRONG output) and the user's source code.
+Analyze precisely WHY the user's code produces the wrong output on THIS input. Reference the actual values/lines. Then give a concise, actionable hint to fix it (do NOT dump a full corrected solution unless the fix is a one-liner).
+Return ONLY a single JSON object: {"diagnosis": "<what goes wrong and why, 2-4 sentences>", "hint": "<a concrete fix hint, 1-3 sentences>"}."""
+
+
+class AISolutionRequest(BaseModel):
+    problem: str = Field(min_length=1, max_length=20000)
+    language: str = "cpp"
+
+
+class AIGeneratorRequest(BaseModel):
+    problem: str = Field(min_length=1, max_length=20000)
+
+
+class AIExplainRequest(BaseModel):
+    problem: Optional[str] = ""
+    language: str = "cpp"
+    code: str
+    input: str
+    expected: str
+    output: str
+
+
+@api_router.get("/ai/status")
+async def ai_status():
+    return {"enabled": bool(GROQ_API_KEY), "model": GROQ_MODEL}
+
+
+@api_router.post("/ai/generate-solution")
+def ai_generate_solution(req: AISolutionRequest):
+    if req.language not in LANGS:
+        raise HTTPException(status_code=400, detail="Unsupported language")
+    user = (f"Problem statement:\n{req.problem}\n\n"
+            f"Target language: {LANGS[req.language]['label']} ({req.language}).\n"
+            f"Write the reference solution now.")
+    data = groq_json(SOLUTION_SYSTEM, user)
+    code = data.get("code", "")
+    if not code.strip():
+        raise HTTPException(status_code=502, detail="AI returned empty code")
+    return {"code": code, "explanation": data.get("explanation", ""), "language": req.language}
+
+
+GENERATOR_SYSTEM = ("You are an expert at writing competitive-programming random test generators. "
+                    "Return ONLY a single valid JSON object as instructed, no markdown, no prose.")
+
+
+@api_router.post("/ai/generate-generator")
+def ai_generate_generator(req: AIGeneratorRequest):
+    base_user = (f"Problem statement:\n{req.problem}\n\n{DSL_SPEC}\n\n"
+                 "Produce a random-test generator template in this DSL that outputs a valid random "
+                 "input for the problem. Return ONLY JSON: "
+                 '{"template": "<the DSL template>", "explanation": "<1-2 sentences>"}.')
+    user = base_user
+    last_err = None
+    for attempt in range(2):
+        data = groq_json(GENERATOR_SYSTEM, user)
+        template = data.get("template", "")
+        try:
+            build_generator({"mode": "advanced", "template": template})(random.Random(7))
+            return {"template": template, "explanation": data.get("explanation", ""), "mode": "advanced"}
+        except GenError as e:
+            last_err = str(e)
+            user = base_user + (f"\n\nIMPORTANT: your previous template failed with this error: '{last_err}'. "
+                                "Fix it and strictly follow the DSL grammar (integers only, define variables before use).")
+    raise HTTPException(status_code=502, detail=f"AI generator template was invalid: {last_err}")
+
+
+@api_router.post("/ai/explain")
+def ai_explain(req: AIExplainRequest):
+    prob = f"Problem statement:\n{req.problem}\n\n" if (req.problem or "").strip() else ""
+    user = (f"{prob}Language: {req.language}\n\n"
+            f"User's code:\n```\n{req.code}\n```\n\n"
+            f"Failing input:\n```\n{req.input}\n```\n\n"
+            f"Expected output:\n```\n{req.expected}\n```\n\n"
+            f"User's wrong output:\n```\n{req.output}\n```\n\n"
+            "Explain the bug and give a hint.")
+    data = groq_json(EXPLAIN_SYSTEM, user, max_tokens=1500)
+    return {"diagnosis": data.get("diagnosis", ""), "hint": data.get("hint", "")}
 
 
 app.include_router(api_router)

@@ -1,0 +1,27 @@
+{
+  "summary": "Iteration 3: Verified AI (Groq) integration and UI decluttering. Added /app/backend/tests/test_ai_endpoints.py (6 tests: ai/status, generate-solution for cpp/python/java, generate-generator with /preview validation, explain off-by-one). All 6 AI tests PASS. Full backend suite 32/32 PASS. Frontend Playwright: settings-btn opens settings-popover exposing cfg-numtests/cfg-timelimit/cfg-memlimit/cfg-stop-toggle; values are respected on run. ai-assistant-btn opens ai-assistant-sheet; ai-gen-solution-btn (target=Correct, lang=cpp) populates Correct/Brute editor with valid C++ + success toast + ai-note. ai-gen-generator-btn switches Advanced tab and fills advanced-template with valid DSL (verified via preview). Stress run of default C++ WA against generated brute produced WA banner (Failed at test #1). Clicking test-row-1 + explain-btn-1 rendered explain-result-1 with Diagnosis + Hint that correctly identified the off-by-one (\"loop iterates only n-1 times... skips the last element\"). Regression: run-progress bar, WA banner, diff panel, typed vars, advanced preview all still work.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_ai_endpoints.py",
+    "/app/backend/tests/test_stress_jobs.py",
+    "/app/backend/tests/test_stress_api.py",
+    "/app/test_reports/pytest/pytest_ai_iter3.xml",
+    "/app/test_reports/pytest/pytest_all_iter3.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "AIAssistant.jsx: solTarget default is 'brute' but the review spec asks to test target=Correct — matches (brute==Correct/Brute editor). Behavior correct; consider renaming state to 'correct' for clarity.",
+    "server.py AI endpoints rely on Groq being available; there is no explicit fallback if GROQ_API_KEY is missing (get_groq raises). /api/ai/status correctly reports enabled=true when key present — good.",
+    "generate-generator has a single repair retry on invalid DSL; for reliability under model hiccups consider 2 retries with exponential backoff.",
+    "Explain endpoint returns 200 with diagnosis/hint fields; there is no explicit schema validation from Groq JSON output — currently robust but a Pydantic response model would harden against future prompt drift.",
+    "ResultsPanel.TestDetail passes userLang/userCode/problem to /api/ai/explain — good. Missing problem is tolerated by backend."
+  ],
+  "updated_files": ["/app/backend/tests/test_ai_endpoints.py"],
+  "success_rate": {"backend": "100% (32/32 incl. 6 new AI)", "frontend": "100% (settings popover, AI sheet solution+generator, Explain-with-AI diagnosis+hint, WA regression)"},
+  "test_credentials": "N/A (no auth)",
+  "seed_data_creation": "None (stateless)",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "AI backend tests live in /app/backend/tests/test_ai_endpoints.py. Groq calls take ~5-15s each; use timeout>=60 and single retry on 5xx. Full pytest run ~33s. UI flow confirmed: settings-btn → settings-popover, ai-assistant-btn → ai-assistant-sheet with data-testid ai-problem-input/ai-sol-target/ai-sol-lang/ai-gen-solution-btn/ai-gen-generator-btn/ai-note. Explain flow: test-row-N (only enabled for non-AC), explain-btn-N, explain-result-N."
+}

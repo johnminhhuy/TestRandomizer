@@ -29,3 +29,23 @@ export const cancelRun = async (jobId) => {
   const { data } = await api.post(`/run/cancel/${jobId}`);
   return data;
 };
+
+export const aiStatus = async () => {
+  const { data } = await api.get("/ai/status");
+  return data;
+};
+
+export const aiGenerateSolution = async (problem, language) => {
+  const { data } = await api.post("/ai/generate-solution", { problem, language });
+  return data;
+};
+
+export const aiGenerateGenerator = async (problem) => {
+  const { data } = await api.post("/ai/generate-generator", { problem });
+  return data;
+};
+
+export const aiExplain = async (payload) => {
+  const { data } = await api.post("/ai/explain", payload);
+  return data;
+};

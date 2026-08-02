@@ -1,6 +1,8 @@
 import React, { useState } from "react";
 import { VERDICTS } from "../lib/constants";
-import { Warning, CheckCircle, Cpu, Clock, CircleNotch, StopCircle } from "@phosphor-icons/react";
+import { Warning, CheckCircle, Cpu, Clock, CircleNotch, StopCircle, Sparkle, Lightbulb } from "@phosphor-icons/react";
+import { aiExplain } from "../lib/apiClient";
+import { toast } from "sonner";
 
 const Badge = ({ v, size = "sm" }) => {
   const info = VERDICTS[v] || VERDICTS.ERR;
@@ -57,28 +59,79 @@ const Diff = ({ expected, output }) => {
   );
 };
 
-const TestDetail = ({ t }) => (
-  <div className="border-t border-[#262626] p-3 space-y-3 bg-[#050505]" data-testid={`test-detail-${t.index}`}>
-    {t.note && <div className="text-xs text-[#A3A3A3]">{t.note}</div>}
-    <div>
-      <div className="text-[10px] uppercase tracking-widest text-[#A3A3A3] mb-1">Input</div>
-      <pre className="bg-[#0c0c0c] border border-[#262626] rounded-sm p-2 text-xs font-mono max-h-32 overflow-auto whitespace-pre-wrap text-white">
-        {t.input || "(empty)"}
-      </pre>
-    </div>
-    {(t.expected !== undefined || t.output !== undefined) && (
-      <Diff expected={t.expected} output={t.output} />
-    )}
-    {t.stderr && (
+const TestDetail = ({ t, problem, userCode, userLang }) => {
+  const [loading, setLoading] = useState(false);
+  const [explain, setExplain] = useState(null);
+
+  const onExplain = async () => {
+    setLoading(true);
+    try {
+      const res = await aiExplain({
+        problem: problem || "",
+        language: userLang,
+        code: userCode,
+        input: t.input || "",
+        expected: t.expected || "",
+        output: t.output || "",
+      });
+      setExplain(res);
+    } catch (e) {
+      toast.error("AI explain failed", { description: e?.response?.data?.detail || e.message });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="border-t border-[#262626] p-3 space-y-3 bg-[#050505]" data-testid={`test-detail-${t.index}`}>
+      {t.note && <div className="text-xs text-[#A3A3A3]">{t.note}</div>}
       <div>
-        <div className="text-[10px] uppercase tracking-widest text-[#D946EF] mb-1">stderr</div>
-        <pre className="bg-[#0c0c0c] border border-[#262626] rounded-sm p-2 text-xs font-mono max-h-28 overflow-auto whitespace-pre-wrap text-[#D946EF]">
-          {t.stderr}
+        <div className="text-[10px] uppercase tracking-widest text-[#A3A3A3] mb-1">Input</div>
+        <pre className="bg-[#0c0c0c] border border-[#262626] rounded-sm p-2 text-xs font-mono max-h-32 overflow-auto whitespace-pre-wrap text-white">
+          {t.input || "(empty)"}
         </pre>
       </div>
-    )}
-  </div>
-);
+      {(t.expected !== undefined || t.output !== undefined) && (
+        <Diff expected={t.expected} output={t.output} />
+      )}
+      {t.stderr && (
+        <div>
+          <div className="text-[10px] uppercase tracking-widest text-[#D946EF] mb-1">stderr</div>
+          <pre className="bg-[#0c0c0c] border border-[#262626] rounded-sm p-2 text-xs font-mono max-h-28 overflow-auto whitespace-pre-wrap text-[#D946EF]">
+            {t.stderr}
+          </pre>
+        </div>
+      )}
+      {t.input && (
+        <button
+          data-testid={`explain-btn-${t.index}`}
+          onClick={onExplain}
+          disabled={loading}
+          className="flex items-center gap-2 w-full justify-center border border-[#007AFF]/50 text-[#007AFF] hover:bg-[#007AFF] hover:text-white font-display font-bold uppercase tracking-widest text-[11px] px-3 h-8 rounded-sm transition-colors disabled:opacity-40"
+        >
+          {loading ? <CircleNotch size={14} className="animate-spin" /> : <Sparkle size={14} weight="fill" />}
+          {loading ? "Analyzing..." : "Explain with AI"}
+        </button>
+      )}
+      {explain && (
+        <div data-testid={`explain-result-${t.index}`} className="space-y-2">
+          <div className="border border-[#EF4444]/40 bg-[#EF4444]/10 rounded-sm p-2.5">
+            <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-widest text-[#EF4444] mb-1">
+              <Warning size={12} /> Diagnosis
+            </div>
+            <p className="text-xs text-[#f3c9c9] leading-relaxed">{explain.diagnosis}</p>
+          </div>
+          <div className="border border-[#22C55E]/40 bg-[#22C55E]/10 rounded-sm p-2.5">
+            <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-widest text-[#22C55E] mb-1">
+              <Lightbulb size={12} /> Hint
+            </div>
+            <p className="text-xs text-[#c9f3d5] leading-relaxed">{explain.hint}</p>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
 
 const EmptyState = ({ running }) => (
   <div className="h-full flex flex-col items-center justify-center text-center p-8" data-testid="results-empty">
@@ -96,7 +149,7 @@ const EmptyState = ({ running }) => (
   </div>
 );
 
-export const ResultsPanel = ({ result, running, ceError, progress }) => {
+export const ResultsPanel = ({ result, running, ceError, progress, problem, userCode, userLang }) => {
   const [openIdx, setOpenIdx] = useState(null);
 
   if (ceError) {
@@ -229,7 +282,9 @@ export const ResultsPanel = ({ result, running, ceError, progress }) => {
                 </span>
               </div>
             </button>
-            {openIdx === t.index && t.verdict !== "AC" && <TestDetail t={t} />}
+            {openIdx === t.index && t.verdict !== "AC" && (
+              <TestDetail t={t} problem={problem} userCode={userCode} userLang={userLang} />
+            )}
           </div>
         ))}
       </div>
