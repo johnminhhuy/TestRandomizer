@@ -29,15 +29,19 @@ Build an app that stress-tests competitive programming code: take the user's sol
 - Support C++, Python, Java. Full verdict set.
 
 ## Implemented (2026-06)
-- Full stress-test engine with AC/WA/TLE/RTE/CE/MLE verdicts — verified via testing agent (backend 12/12, frontend all flows pass).
+- Full stress-test engine with AC/WA/TLE/RTE/CE/MLE verdicts — verified via testing agent.
 - Simple visual generator builder + Advanced DSL, both with live preview.
-- 3-column dark IDE-style UI, code editors with syntax highlighting + language selectors, results dashboard with expandable failing-test diff, summary verdict counts, run config (tests/time/mem/stop-on-first-fail).
+- Typed & constrained variables (int/float/char/string + distinct arrays); job-based live progress + cancel; concurrent reference/user execution.
+- **AI (Groq, openai/gpt-oss-120b)**: generate reference solution, generate test generator (self-validated DSL), and explain-a-counterexample (diagnosis + hint). Key in backend/.env (GROQ_API_KEY). Endpoints: /api/ai/status, /api/ai/generate-solution, /api/ai/generate-generator, /api/ai/explain.
+- **GUI declutter**: run config moved to a header Settings popover; AI slide-over from header; left panel now just the generator.
+
+## Notes
+- NOTE: user said "grok" but pasted a Groq (gsk_) key; built on Groq accordingly.
 
 ## Backlog / Remaining
-- **P1**: AI generation via Grok API (auto-write generator / brute solution) — deferred per user.
-- **P2**: Custom checker (special judge) for problems with multiple valid answers.
-- **P2**: Save/load problems (would require accounts — currently no login).
-- **P2**: Global concurrency semaphore on /api/run to protect container under heavy parallel use.
+- **P2**: Custom checker (special judge) for multiple valid answers.
+- **P2**: AI generator supports strings/chars (currently DSL is int-only).
+- **P2**: Save/load problems (needs accounts).
 
 ## Next Tasks
 - Wire Grok API for AI-assisted generator/solution creation when user provides key.
