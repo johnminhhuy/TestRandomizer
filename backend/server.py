@@ -459,9 +459,9 @@ class StressRequest(BaseModel):
     bruteCode: str
     bruteLang: str
     generator: Dict[str, Any]
-    numTests: int = Field(default=20, ge=1, le=200)
-    timeLimitMs: int = Field(default=2000, ge=100, le=10000)
-    memLimitMb: int = Field(default=256, ge=16, le=1024)
+    numTests: int = Field(default=20, ge=1, le=5000)
+    timeLimitMs: int = Field(default=2000, ge=10, le=60000)
+    memLimitMb: int = Field(default=256, ge=4, le=8192)
     stopOnFirstFail: bool = True
     seed: Optional[int] = None
 
@@ -644,6 +644,11 @@ def _run_job(job: Dict[str, Any], req: "StressRequest"):
                     entry["stderr"] = _truncate(res["stderr"])
                 if job["first_fail"] is None:
                     job["first_fail"] = i + 1
+            elif i < 300:
+                # keep passing-test details (capped) so the user can inspect AC cases
+                entry["input"] = _truncate(inp)
+                entry["expected"] = _truncate(expected)
+                entry["output"] = _truncate(res["stdout"])
             job["tests"].append(entry)
             job["done"] = i + 1
 

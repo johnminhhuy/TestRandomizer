@@ -102,7 +102,7 @@ const TestDetail = ({ t, problem, userCode, userLang }) => {
           </pre>
         </div>
       )}
-      {t.input && (
+      {t.input && t.verdict !== "AC" && (
         <button
           data-testid={`explain-btn-${t.index}`}
           onClick={onExplain}
@@ -112,6 +112,11 @@ const TestDetail = ({ t, problem, userCode, userLang }) => {
           {loading ? <CircleNotch size={14} className="animate-spin" /> : <Sparkle size={14} weight="fill" />}
           {loading ? "Analyzing..." : "Explain with AI"}
         </button>
+      )}
+      {t.verdict === "AC" && (
+        <div className="flex items-center gap-1.5 text-[11px] text-[#22C55E]">
+          <CheckCircle size={13} weight="fill" /> Your output matched the reference on this test.
+        </div>
       )}
       {explain && (
         <div data-testid={`explain-result-${t.index}`} className="space-y-2">
@@ -264,10 +269,7 @@ export const ResultsPanel = ({ result, running, ceError, progress, problem, user
             <button
               data-testid={`test-row-${t.index}`}
               onClick={() => setOpenIdx(openIdx === t.index ? null : t.index)}
-              disabled={t.verdict === "AC"}
-              className={`w-full flex items-center justify-between px-4 py-2.5 text-left transition-colors ${
-                t.verdict === "AC" ? "cursor-default" : "hover:bg-[#1E1E1E]"
-              }`}
+              className="w-full flex items-center justify-between px-4 py-2.5 text-left transition-colors hover:bg-[#1E1E1E]"
             >
               <div className="flex items-center gap-3">
                 <span className="font-mono text-xs text-[#525252] w-8">#{t.index}</span>
@@ -282,7 +284,7 @@ export const ResultsPanel = ({ result, running, ceError, progress, problem, user
                 </span>
               </div>
             </button>
-            {openIdx === t.index && t.verdict !== "AC" && (
+            {openIdx === t.index && (
               <TestDetail t={t} problem={problem} userCode={userCode} userLang={userLang} />
             )}
           </div>

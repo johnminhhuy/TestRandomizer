@@ -82,7 +82,18 @@ export default function StressTester() {
     setResult(null);
     setCeError(null);
     cancelledRef.current = false;
-    setProgress({ done: 0, total: Number(numTests), phase: "queued" });
+    const clamp = (v, lo, hi, d) => {
+      const n = Number(v);
+      if (!Number.isFinite(n)) return d;
+      return Math.min(hi, Math.max(lo, Math.round(n)));
+    };
+    const nt = clamp(numTests, 1, 5000, 30);
+    const tl = clamp(timeLimitMs, 10, 60000, 2000);
+    const mem = clamp(memLimitMb, 4, 8192, 256);
+    setNumTests(nt);
+    setTimeLimitMs(tl);
+    setMemLimitMb(mem);
+    setProgress({ done: 0, total: nt, phase: "queued" });
     try {
       const { jobId } = await startRun({
         userCode,
@@ -90,16 +101,16 @@ export default function StressTester() {
         bruteCode,
         bruteLang,
         generator: generator(),
-        numTests: Number(numTests),
-        timeLimitMs: Number(timeLimitMs),
-        memLimitMb: Number(memLimitMb),
+        numTests: nt,
+        timeLimitMs: tl,
+        memLimitMb: mem,
         stopOnFirstFail,
       });
       jobRef.current = jobId;
       poll();
     } catch (e) {
       setRunning(false);
-      toast.error("Run failed", { description: e?.message || "Server error" });
+      toast.error("Run failed", { description: e?.response?.data?.detail || e?.message || "Server error" });
     }
   };
 
@@ -176,6 +187,9 @@ export default function StressTester() {
                 <input type="checkbox" checked={stopOnFirstFail} onChange={(e) => setStopOnFirstFail(e.target.checked)} className="accent-[#007AFF] w-3.5 h-3.5" />
                 <span className="text-xs text-[#A3A3A3]">Stop on first failing test</span>
               </label>
+              <p className="text-[10px] text-[#525252] mt-2 leading-relaxed">
+                Tests 1–5000 · Time 10–60000 ms · Mem 4–8192 MB. Out-of-range values are adjusted automatically.
+              </p>
             </PopoverContent>
           </Popover>
 

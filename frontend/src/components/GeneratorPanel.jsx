@@ -13,6 +13,13 @@ const TYPES = [
   { id: "string", label: "string" },
 ];
 
+const TYPE_DEFAULTS = {
+  int: { min: "1", max: "100" },
+  float: { min: "0", max: "1", decimals: "2" },
+  char: { charset: "a-z" },
+  string: { charset: "a-z", len: "5" },
+};
+
 const TypeSelect = ({ value, onChange, testid }) => (
   <select
     data-testid={testid}
@@ -157,7 +164,7 @@ const SimpleBuilder = ({ cfg, setCfg }) => {
                   data-testid={`var-name-${i}`}
                 />
                 <span className="text-[10px] text-[#525252] lowercase">is a</span>
-                <TypeSelect testid={`var-type-${i}`} value={v.type} onChange={(val) => updateVar(i, { type: val })} />
+                <TypeSelect testid={`var-type-${i}`} value={v.type} onChange={(val) => updateVar(i, { type: val, ...TYPE_DEFAULTS[val] })} />
                 <div className="flex-1" />
                 <button data-testid={`remove-var-${i}`} onClick={() => removeVar(i)} className="text-[#525252] hover:text-[#EF4444] p-1">
                   <Trash size={14} />
@@ -242,7 +249,7 @@ const SimpleBuilder = ({ cfg, setCfg }) => {
                     <span className="text-[10px] text-[#525252] lowercase">how many</span>
                     <input className={inputCls + " w-24"} value={l.count} onChange={(e) => updateLine(i, { count: e.target.value })} placeholder="e.g. n" data-testid={`line-${i}-count`} />
                     <span className="text-[10px] text-[#525252] lowercase">of</span>
-                    <TypeSelect testid={`line-type-${i}`} value={l.type} onChange={(val) => updateLine(i, { type: val })} />
+                    <TypeSelect testid={`line-type-${i}`} value={l.type} onChange={(val) => updateLine(i, { type: val, ...TYPE_DEFAULTS[val] })} />
                   </div>
                   <div className="flex items-center gap-1.5 flex-wrap">
                     <span className="text-[10px] text-[#525252] lowercase">range</span>
