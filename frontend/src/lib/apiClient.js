@@ -35,6 +35,11 @@ export const aiStatus = async () => {
   return data;
 };
 
+export const aiSetConfig = async (payload) => {
+  const { data } = await api.post("/ai/config", payload);
+  return data;
+};
+
 export const aiGenerateSolution = async (problem, language) => {
   const { data } = await api.post("/ai/generate-solution", { problem, language });
   return data;

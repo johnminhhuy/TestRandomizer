@@ -35,6 +35,33 @@ int main(){
     return 0;
 }`;
 
+export const DEFAULT_SIMPLE_TEXT = `# SIMPLE TEMPLATE — describe your input in plain lines.
+#   let n = 1..8            define a random number (reusable below)
+#   print n                 write values on one line
+#   list n ints in 1..20    n random ints  (add 'distinct' for unique)
+#   list n chars in a-z     n random letters
+#   word 5 in a-z           one random string of length 5
+#   text YES                a fixed line of text
+
+let n = 1..8
+print n
+list n ints in 1..20`;
+
+export const SIMPLE_PRESETS = [
+  { id: "array", label: "Array", text: `let n = 1..8\nprint n\nlist n ints in 1..20` },
+  { id: "number", label: "One number", text: `let n = 1..1000\nprint n` },
+  { id: "two", label: "Two numbers", text: `let a = 1..100\nlet b = 1..100\nprint a b` },
+  { id: "distinct", label: "Distinct list", text: `let n = 1..8\nprint n\nlist n distinct ints in 1..50` },
+  { id: "string", label: "String", text: `let n = 3..10\nprint n\nword n in a-z` },
+];
+
+export const ADVANCED_PRESETS = [
+  { id: "array", label: "Array", template: `n = int(1, 10)\nprint(n)\narray(n, 1, 100)` },
+  { id: "matrix", label: "Matrix", template: `r = int(1, 5)\nc = int(1, 5)\nprint(r, c)\ngrid(r, c, 0, 9)` },
+  { id: "graph", label: "Graph edges", template: `n = int(2, 8)\nm = int(1, n*(n-1)//2)\nprint(n, m)\ngrid(m, 2, 1, n)` },
+  { id: "two", label: "Two numbers", template: `a = int(1, 100)\nb = int(1, 100)\nprint(a, b)` },
+];
+
 export const DEFAULT_SIMPLE = {
   mode: "simple",
   variables: [{ name: "n", type: "int", min: "1", max: "8" }],

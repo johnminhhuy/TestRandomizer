@@ -8,7 +8,7 @@ import { startRun, getRunStatus, cancelRun } from "../lib/apiClient";
 import {
   DEFAULT_USER_CPP,
   DEFAULT_BRUTE_CPP,
-  DEFAULT_SIMPLE,
+  DEFAULT_SIMPLE_TEXT,
   DEFAULT_ADVANCED_TEMPLATE,
 } from "../lib/constants";
 import { Play, Lightning, StopCircle, GearSix, Sparkle } from "@phosphor-icons/react";
@@ -24,7 +24,7 @@ export default function StressTester() {
   const [bruteLang, setBruteLang] = useState("cpp");
 
   const [mode, setMode] = useState("simple");
-  const [simpleCfg, setSimpleCfg] = useState(DEFAULT_SIMPLE);
+  const [simpleText, setSimpleText] = useState(DEFAULT_SIMPLE_TEXT);
   const [template, setTemplate] = useState(DEFAULT_ADVANCED_TEMPLATE);
 
   const [numTests, setNumTests] = useState(30);
@@ -44,7 +44,7 @@ export default function StressTester() {
   const cancelledRef = useRef(false);
 
   const generator = () =>
-    mode === "simple" ? { ...simpleCfg, mode: "simple" } : { mode: "advanced", template };
+    mode === "simple" ? { mode: "simple", text: simpleText } : { mode: "advanced", template };
 
   const poll = async () => {
     try {
@@ -222,8 +222,8 @@ export default function StressTester() {
           <GeneratorPanel
             mode={mode}
             setMode={setMode}
-            simpleCfg={simpleCfg}
-            setSimpleCfg={setSimpleCfg}
+            simpleText={simpleText}
+            setSimpleText={setSimpleText}
             template={template}
             setTemplate={setTemplate}
           />

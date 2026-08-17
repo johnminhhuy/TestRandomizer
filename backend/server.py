@@ -34,30 +34,57 @@ from openai import OpenAI  # noqa: E402
 
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
 GROQ_MODEL = os.environ.get("GROQ_MODEL", "openai/gpt-oss-120b")
-_groq_client = None
+AI_CONFIG_FILE = ROOT_DIR / ".ai_config.json"
+_runtime_ai = {"api_key": None, "model": None}
+
+
+def _load_ai_config():
+    try:
+        if AI_CONFIG_FILE.exists():
+            data = json.loads(AI_CONFIG_FILE.read_text())
+            _runtime_ai["api_key"] = data.get("api_key")
+            _runtime_ai["model"] = data.get("model")
+    except Exception:
+        pass
+
+
+def _save_ai_config():
+    try:
+        AI_CONFIG_FILE.write_text(json.dumps(_runtime_ai))
+    except Exception:
+        pass
+
+
+_load_ai_config()
+
+
+def current_key():
+    return _runtime_ai["api_key"] or GROQ_API_KEY
+
+
+def current_model():
+    return _runtime_ai["model"] or GROQ_MODEL
 
 
 def get_groq():
-    global _groq_client
-    if not GROQ_API_KEY:
-        raise HTTPException(status_code=503, detail="AI is not configured (missing GROQ_API_KEY).")
-    if _groq_client is None:
-        _groq_client = OpenAI(api_key=GROQ_API_KEY,
-                              base_url="https://api.groq.com/openai/v1",
-                              timeout=60.0, max_retries=1)
-    return _groq_client
+    key = current_key()
+    if not key:
+        raise HTTPException(status_code=503, detail="AI is not configured. Add a Groq API key in the AI panel.")
+    return OpenAI(api_key=key, base_url="https://api.groq.com/openai/v1",
+                  timeout=60.0, max_retries=1)
 
 
 def groq_json(system: str, user: str, max_tokens: int = 4096) -> Dict[str, Any]:
     """Call Groq expecting a single JSON object back, with one repair retry."""
     client = get_groq()
+    model = current_model()
     messages = [{"role": "system", "content": system},
                 {"role": "user", "content": user}]
     last_err = ""
     for attempt in range(2):
         try:
             comp = client.chat.completions.create(
-                model=GROQ_MODEL, messages=messages, temperature=0.2,
+                model=model, messages=messages, temperature=0.2,
                 max_completion_tokens=max_tokens,
                 response_format={"type": "json_object"},
             )
@@ -352,13 +379,106 @@ def _split_args(inner: str) -> List[str]:
     return args
 
 
+def generate_simple_text(template: str, rng: random.Random) -> str:
+    """A beginner-friendly readable template.
+
+    let n = 1..8            # random int variable
+    print n                 # print values on one line
+    list n ints in 1..20    # n random ints (add 'distinct' for unique)
+    list n chars in a-z     # n random characters
+    word 5 in a-z           # one random string of length 5
+    text YES                # a fixed line of text
+    blank                   # an empty line
+    """
+    env: Dict[str, int] = {}
+    out: List[str] = []
+    for raw in template.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line == "blank":
+            out.append("")
+        elif line.startswith("let "):
+            body = line[4:].strip()
+            if "=" not in body:
+                raise GenError(f"'let' needs '=' — try: let n = 1..10   (got: {line})")
+            name, rng_part = body.split("=", 1)
+            name = name.strip()
+            rng_part = rng_part.strip()
+            if not name.isidentifier():
+                raise GenError(f"Invalid variable name '{name}'")
+            if ".." not in rng_part:
+                raise GenError(f"Range must look like lo..hi — try: let {name} = 1..100   (got: {line})")
+            lo_s, hi_s = rng_part.split("..", 1)
+            lo, hi = _safe_eval(lo_s, env), _safe_eval(hi_s, env)
+            if lo > hi:
+                raise GenError(f"'{name}': low({lo}) is greater than high({hi})")
+            env[name] = rng.randint(lo, hi)
+        elif line.startswith("print "):
+            args = line[6:].replace(",", " ").split()
+            out.append(" ".join(str(_safe_eval(a, env)) for a in args))
+        elif line.startswith("list "):
+            body = line[5:].strip()
+            if " in " not in body:
+                raise GenError(f"'list' needs 'in' — try: list n ints in 1..100   (got: {line})")
+            left, right = body.split(" in ", 1)
+            lt = left.strip().split()
+            if not lt:
+                raise GenError(f"'list' is missing a count — try: list n ints in 1..100   (got: {line})")
+            kind = lt[-1].lower()
+            count_words = lt[:-1]
+            distinct = "distinct" in [w.lower() for w in count_words]
+            count_words = [w for w in count_words if w.lower() != "distinct"]
+            count_expr = " ".join(count_words).strip()
+            if not count_expr:
+                raise GenError(f"'list' is missing a count — try: list n ints in 1..100   (got: {line})")
+            count = max(0, _safe_eval(count_expr, env))
+            if count > 200000:
+                raise GenError("list is too large (>200000)")
+            if kind in ("ints", "int", "numbers"):
+                if ".." not in right:
+                    raise GenError(f"ints range must be lo..hi — try: list {count_expr} ints in 1..100   (got: {line})")
+                lo_s, hi_s = right.strip().split("..", 1)
+                lo, hi = _safe_eval(lo_s, env), _safe_eval(hi_s, env)
+                if lo > hi:
+                    raise GenError(f"list range {lo}>{hi} in: {line}")
+                if distinct:
+                    if count > (hi - lo + 1):
+                        raise GenError(f"'distinct' needs the range to hold at least {count} values (in: {line})")
+                    out.append(" ".join(str(x) for x in rng.sample(range(lo, hi + 1), count)))
+                else:
+                    out.append(" ".join(str(rng.randint(lo, hi)) for _ in range(count)))
+            elif kind in ("chars", "char", "letters"):
+                cs = _resolve_charset(right.strip())
+                out.append(" ".join(rng.choice(cs) for _ in range(count)))
+            else:
+                raise GenError(f"'list' must say 'ints' or 'chars' — got '{kind}' in: {line}")
+        elif line.startswith("word "):
+            body = line[5:].strip()
+            if " in " not in body:
+                raise GenError(f"'word' needs 'in' — try: word 5 in a-z   (got: {line})")
+            len_s, cs_s = body.split(" in ", 1)
+            L = max(0, _safe_eval(len_s.strip(), env))
+            if L > 200000:
+                raise GenError("word is too long")
+            cs = _resolve_charset(cs_s.strip())
+            out.append("".join(rng.choice(cs) for _ in range(L)))
+        elif line.startswith("text "):
+            out.append(line[5:])
+        else:
+            raise GenError(f"Don't understand: '{line}'. Use let / print / list / word / text / blank.")
+    return "\n".join(out) + "\n"
+
+
 def build_generator(gen: Dict[str, Any]):
     mode = gen.get("mode", "simple")
 
     def make(rng: random.Random) -> str:
         if mode == "advanced":
             return generate_advanced(gen.get("template", ""), rng)
-        return generate_simple(gen, rng)
+        if "text" in gen:
+            return generate_simple_text(gen.get("text", ""), rng)
+        return generate_simple(gen, rng)  # legacy visual-builder form
 
     return make
 
@@ -768,9 +888,48 @@ class AIExplainRequest(BaseModel):
     output: str
 
 
+class AIConfigRequest(BaseModel):
+    apiKey: Optional[str] = None
+    model: Optional[str] = None
+    clear: bool = False
+
+
 @api_router.get("/ai/status")
 async def ai_status():
-    return {"enabled": bool(GROQ_API_KEY), "model": GROQ_MODEL}
+    return {"enabled": bool(current_key()), "model": current_model(),
+            "usingUserKey": bool(_runtime_ai["api_key"]),
+            "defaultAvailable": bool(GROQ_API_KEY)}
+
+
+@api_router.post("/ai/config")
+def ai_config(req: AIConfigRequest):
+    if req.clear:
+        _runtime_ai["api_key"] = None
+        _runtime_ai["model"] = None
+        _save_ai_config()
+        return {"ok": True, "enabled": bool(current_key()), "model": current_model(),
+                "usingUserKey": False, "defaultAvailable": bool(GROQ_API_KEY)}
+
+    test_key = (req.apiKey or "").strip() or current_key()
+    test_model = (req.model or "").strip() or current_model()
+    if not test_key:
+        raise HTTPException(status_code=400, detail="No API key provided.")
+    # validate by listing models with the candidate key
+    try:
+        probe = OpenAI(api_key=test_key, base_url="https://api.groq.com/openai/v1",
+                       timeout=20.0, max_retries=0)
+        probe.models.list()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid API key or could not reach Groq.")
+
+    if req.apiKey is not None and req.apiKey.strip():
+        _runtime_ai["api_key"] = req.apiKey.strip()
+    if req.model is not None and req.model.strip():
+        _runtime_ai["model"] = req.model.strip()
+    _save_ai_config()
+    return {"ok": True, "enabled": True, "model": current_model(),
+            "usingUserKey": bool(_runtime_ai["api_key"]),
+            "defaultAvailable": bool(GROQ_API_KEY)}
 
 
 @api_router.post("/ai/generate-solution")

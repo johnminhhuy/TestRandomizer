@@ -1,0 +1,51 @@
+{
+  "summary": "Iteration 6 (AI key/model config + readable Simple template + polished Advanced) verified end-to-end. Added new pytest module /app/backend/tests/test_ai_config_and_simple_text.py (6 tests) covering GET /api/ai/status shape, POST /api/ai/config invalid key (400), model switch + clear-to-default, simple-text preview ok/error, and advanced graph preset preview. Full backend suite: 48/48 passing (~93s). Frontend Playwright validated: Simple tab shows pre-filled simple-template textarea, all 5 preset chips (array/number/two/distinct/string) swap the template, simple-guide visible & collapsible, preview-btn renders valid input in preview-output; Advanced tab has advanced-template + 4 preset chips (array/matrix/graph/two) + advanced-guide, graph preset produced valid multi-line input '2 1\\n1 2'. AI sheet 'Groq connection' expands, model-only save with llama-3.3-70b-versatile succeeded (toast 'AI connection saved'), obviously-invalid key 'gsk_definitely_bad_key_xyz' returned 400 and surfaced 'Couldn't save key — Invalid API key or could not reach Groq.' Reverted server to default model after tests. Regressions for all 6 verdicts (WA/AC-py/AC-java/CE/TLE/RTE/MLE), streaming, cancel, and AI endpoints (status/generate-solution[cpp,py,java]/generate-generator+preview/explain-off-by-one) all pass.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "detailed_results": {
+    "backend_new_tests": {
+      "test_ai_status_shape": "PASS",
+      "test_ai_config_invalid_key (400)": "PASS",
+      "test_ai_config_switch_model_then_clear": "PASS",
+      "test_preview_simple_text_ok": "PASS (n int, list of n ints in range, word len 4 a-z)",
+      "test_preview_simple_text_malformed (missing 'in')": "PASS (ok:false, error mentions 'in')",
+      "test_preview_advanced_graph_preset": "PASS (n∈[2,8], m rows follow)"
+    },
+    "regression_full_suite": "48 passed in 92.74s",
+    "frontend_ui": {
+      "simple_template_prefilled": "PASS (len=442)",
+      "simple_presets_5_chips": "PASS (array/number/two/distinct/string)",
+      "simple_guide_visible": "PASS",
+      "preset_click_replaces_template": "PASS (preset-array changed content)",
+      "preview_simple": "PASS ('6\\n10 19 17 1 19 18\\n')",
+      "advanced_template_prefilled": "PASS (len=170)",
+      "advanced_presets_4_chips": "PASS (array/matrix/graph/two)",
+      "advanced_guide_visible": "PASS",
+      "preview_advanced_graph": "PASS (multi-line: '2 1\\n1 2')",
+      "ai_connection_panel": "PASS (expands, shows 'default key' badge)",
+      "ai_model_save_valid": "PASS (llama-3.3-70b-versatile saved, toast success)",
+      "ai_key_save_invalid": "PASS (backend 400 + red toast 'Couldn't save key — Invalid API key...')"
+    }
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_ai_config_and_simple_text.py",
+    "/app/backend/tests/test_stress_api.py",
+    "/app/backend/tests/test_stress_jobs.py",
+    "/app/backend/tests/test_ai_endpoints.py",
+    "/app/backend/tests/test_bounds_and_ac.py",
+    "/app/test_reports/pytest/iter6_full.xml",
+    "/app/test_reports/pytest/iter6_new.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Nit: /api/ai/config persists overrides to .ai_config.json — good for hot-reload, but the file lives in the backend working dir and is not gitignored yet; if it is committed by accident it could leak a user key. Consider writing under a stable ignored path (e.g. /app/backend/.data/ai_config.json) and adding it to .gitignore.",
+    "Nit (UX): AIAssistant.ConnectionSection auto-collapses after a successful save, but the toast points users to a hidden state. Consider keeping it open on invalid-key errors so users can immediately correct the field (currently expanded state is preserved on error — verified — but a hint next to the field would help).",
+    "Nit: generate_simple_text friendly-error mentions 'in' for the missing keyword, which is helpful, but for the 'list' family it might also be worth suggesting the full form 'list <count> [distinct] ints in lo..hi' in the error string."
+  ],
+  "updated_files": ["/app/backend/tests/test_ai_config_and_simple_text.py (new)"],
+  "success_rate": {"backend": "100% (48/48)", "frontend": "100% (all iteration-6 targets + regressions)"},
+  "seed_data_creation": "none; server state reset to default model after run",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend: /app/backend/tests/test_ai_config_and_simple_text.py covers the new /api/ai/status + /api/ai/config endpoints and the new simple-text generator. Server persists AI overrides in a JSON file — remember to POST {clear:true} in teardown if a test switches keys/model, to keep default model 'openai/gpt-oss-120b' stable for subsequent Groq tests. Frontend Simple/Advanced generator is now a plain <textarea> (not CodeMirror) with data-testid='simple-template' / 'advanced-template'; presets have data-testid='preset-<id>'; AI connection panel testids: ai-connection, ai-key-input, ai-model-select, ai-save-key-btn, ai-use-default-btn. To avoid burning Groq quota, prefer model-only save for the happy path."
+}
