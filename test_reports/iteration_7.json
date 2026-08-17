@@ -1,0 +1,31 @@
+{
+  "summary": "Frontend-only testing of new CodeMirror TemplateEditor. Verified editable via typing, all Simple presets (Array/String) and Advanced presets (Matrix/Graph) update editor + preview, end-to-end stress test still finds WA at test #1, AI sheet + Settings unaffected. Discovered one visual sync bug: after user types into the CodeMirror editor, subsequent preset clicks update React state (preview reflects new template, preset button becomes highlighted 'active') but the CodeMirror content area continues to display the previously edited text.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "TemplateEditor (CodeMirror wrapper)",
+        "issue": "CodeMirror does not visually re-render when the `value` prop changes after the user has typed into `.cm-content`. Repro: load page → click into simple-template editor → type any character → click preset-string (or any preset). Result: preset button becomes highlighted (state updated), Preview generates output matching the preset, but the editor still shows the previously edited text. This desyncs UI from underlying state and will confuse users. Root cause: @uiw/react-codemirror treats external `value` updates as no-ops when they match the internal doc state incorrectly / does not push updates after internal edits. Fix suggestions: (a) pass a `key` that changes when preset is picked to force remount, or (b) use an imperative ref with `view.dispatch({ changes: { from:0, to:doc.length, insert: value } })` in a useEffect that runs when `value` differs from `view.state.doc.toString()`.",
+        "selector": "[data-testid=\"simple-template\"] .cm-content, [data-testid=\"advanced-template\"] .cm-content",
+        "priority": "MEDIUM"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [
+    "Fix TemplateEditor sync: force CodeMirror to reflect external value changes after user edits (see suggested fixes in ui_bugs)."
+  ],
+  "critical_code_review_comments": [
+    "TemplateEditor.jsx relies on @uiw/react-codemirror's internal reconciliation of the `value` prop, which is unreliable once user edits happen. Consider either keying by preset id or using an imperative view.dispatch to force sync.",
+    "GeneratorPanel Presets `active={value}` check works, confirming state is being updated correctly on preset click — the desync is purely a rendering issue inside CodeMirror."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (skipped)", "frontend": "~90% (1 medium visual bug)"},
+  "seed_data_creation": "None",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Editable via .cm-content contenteditable — use keyboard.type after click, NOT fill(). Presets before any typing work perfectly and update the editor visually. The bug only appears once the user has entered edits into the CodeMirror. Preview and stress-test integration (POST /api/preview, /api/stress-test) are functional; WA is found on default C++ solutions within ~4s.",
+  "rca of the issue": "@uiw/react-codemirror stores the current editor doc internally. When `value` prop changes, it usually pushes a transaction to sync, but after internal edits (typing) subsequent identical/prop-driven updates sometimes get filtered out and the view never dispatches a replacement transaction. State is fine (Preview + active preset prove it) — only the CodeMirror view is stale. Mitigation: force remount via `key={mode + presetSignature}` OR imperatively dispatch a replace transaction in a useEffect keyed on `value`."
+}

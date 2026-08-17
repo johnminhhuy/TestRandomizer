@@ -1,0 +1,33 @@
+{
+  "summary": "Frontend-only re-verification of the TemplateEditor imperative sync fix. Type-then-preset desync bug is fixed on both Simple and Advanced tabs; AI fill still updates the editor via external-value path; manual typing continues to update state and preview; end-to-end stress test still reports WA on the default C++ example.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_scenarios_executed": [
+    {"scenario": "Simple: type 'USER_TYPED_JUNK_LINE' then click preset-string", "result": "PASS - editor shows preset text ('let n = 3..10\\nprint n\\nword n in a-z'), preset-string is active (bg-[#007AFF])"},
+    {"scenario": "Simple: type more junk then click preset-array", "result": "PASS - editor shows array preset, JUNK2 removed"},
+    {"scenario": "Simple: preview after preset", "result": "PASS - preview outputs '5\\n20 10 6 2 16' consistent with array template"},
+    {"scenario": "Advanced: type 'ADV_JUNK_TYPED' then preset-matrix", "result": "PASS - editor shows matrix template"},
+    {"scenario": "Advanced: type MORE_JUNK then preset-graph", "result": "PASS - editor shows graph template"},
+    {"scenario": "Advanced: preview after preset-graph", "result": "PASS - preview outputs graph edges"},
+    {"scenario": "Manual typing (Simple, 'text HELLO_MANUAL') + preview", "result": "PASS - preview shows 'HELLO_MANUAL' so onChange still wired"},
+    {"scenario": "AI fill via ai-gen-generator-btn for sum problem", "result": "PASS - switched to Advanced tab; editor visibly shows AI-generated template 'a = int(-100, 100)\\nb = int(-100, 100)\\nprint(a, b)'"},
+    {"scenario": "Regression: run-stress-test-btn on default C++ example", "result": "PASS - 'FAILED AT TEST #1' with WA verdict displayed"}
+  ],
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "TemplateEditor useEffect only depends on [value]; if `mode` changes but value stays identical this is fine, but consider also depending on `mode` if language switch ever mattered. Not a bug currently.",
+    "The `active === p[keyName]` comparison in Presets uses full-string equality against the current editor value; after any manual edit no preset shows active, which is expected UX."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A (skipped)", "frontend": "100%"},
+  "seed_data_creation": "None",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "TemplateEditor imperative sync via view.dispatch on value prop change is confirmed working. Selector pattern for CodeMirror content: '[data-testid=\"simple-template\"] .cm-content' (use keyboard.type not fill). Read text via .cm-content innerText.",
+  "rca of the issue": "Previously CodeMirror was uncontrolled after first user input because @uiw/react-codemirror only syncs `value` on initial mount / when no user edits happened. Fix in TemplateEditor.jsx uses useRef+useEffect([value]) to dispatch a full-doc replace transaction when the external value diverges from view.state.doc — verified via type-then-preset test on both tabs."
+}

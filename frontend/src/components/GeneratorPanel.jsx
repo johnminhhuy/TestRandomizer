@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { Eye, BookOpen, CaretDown } from "@phosphor-icons/react";
 import { previewGenerator } from "../lib/apiClient";
 import { SIMPLE_PRESETS, ADVANCED_PRESETS } from "../lib/constants";
+import { TemplateEditor } from "./TemplateEditor";
 import { toast } from "sonner";
 
 const SIMPLE_GUIDE = [
@@ -143,12 +144,11 @@ export const GeneratorPanel = ({ mode, setMode, simpleText, setSimpleText, templ
           />
         </div>
 
-        <textarea
-          data-testid={isSimple ? "simple-template" : "advanced-template"}
+        <TemplateEditor
+          mode={mode}
           value={value}
-          onChange={(e) => setValue(e.target.value)}
-          spellCheck={false}
-          className="w-full h-56 bg-[#1E1E1E] border border-[#262626] text-white text-xs font-mono p-3 rounded-sm outline-none focus:ring-2 focus:ring-[#007AFF] resize-none leading-relaxed"
+          onChange={setValue}
+          testid={isSimple ? "simple-template" : "advanced-template"}
         />
 
         <Guide
