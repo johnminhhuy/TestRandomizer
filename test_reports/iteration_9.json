@@ -1,0 +1,38 @@
+{
+  "summary": "Iteration 9 — verified all 5 changes: Code-mode generator (backend + UI), new advanced/simple data types (chars/word/floats), preview restyle ('generate sample'), syntax guide comment removal + new rows, and AI explain-code endpoint + UI. 7/7 backend pytest cases pass and all UI flows pass, including AI reference-solution generation and 'Explain this code in detail' rendering with approach + numbered steps + complexity + edge cases.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_scenarios_executed": [
+    {"scenario": "POST /api/preview code-mode python", "result": "PASS - ok:true, valid n+list output"},
+    {"scenario": "POST /api/preview code-mode python crash", "result": "PASS - ok:false, ValueError/traceback in error"},
+    {"scenario": "POST /api/preview code-mode cpp (srand/atoi(argv[1]))", "result": "PASS - ok:true, compiled once and produced valid input"},
+    {"scenario": "POST /api/run/start code-mode python (buggy sum n-1 vs correct sum) numTests=20", "result": "PASS - completed with WA on first test (firstFail=1, WA count>=1, tests[0].verdict='WA')"},
+    {"scenario": "POST /api/preview advanced with chars(n,a-z)+word(5,ABC)+floats(n,0,1,3)", "result": "PASS - chars line length=n & regex[a-z]+, word len=5 & [ABC]+, floats have 3 decimals in [0,1]"},
+    {"scenario": "POST /api/preview simple 'list n floats in 0..10'", "result": "PASS - tokens count=n, all have '.', values in range"},
+    {"scenario": "POST /api/ai/explain-code cpp sum solution", "result": "PASS - JSON with non-empty approach, steps[] (>0), complexity, edgeCases"},
+    {"scenario": "UI: preview-btn label", "result": "PASS - reads 'generate sample'"},
+    {"scenario": "UI: simple-guide no '#' comment row, contains 'list n floats'", "result": "PASS"},
+    {"scenario": "UI: advanced-guide has chars(, word(, floats( and no comment row", "result": "PASS"},
+    {"scenario": "UI: gen-tab-code shows code-generator-editor + code-generator-editor-lang", "result": "PASS"},
+    {"scenario": "UI: preset-py/preset-cpp/preset-java swap editor language", "result": "PASS - lang select toggles between python/cpp"},
+    {"scenario": "UI: preview-btn in code mode generates sample into preview-output", "result": "PASS - '2\\n4 1'"},
+    {"scenario": "UI: AI sheet → generate solution → ai-explain-code-btn appears → click → ai-code-explanation renders", "result": "PASS - approach text, numbered '1.'/'2.'/... steps, complexity block, edge cases block all visible"}
+  ],
+  "test_report_links": [
+    "/app/backend/tests/test_iteration9.py",
+    "/app/test_reports/pytest/iter9.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py is now 1125 lines and growing (Generator class, AI endpoints, run engine, models all in one file). Consider splitting into modules (generators/, ai/, run/) — future iterations will keep piling on.",
+    "AIExplainCodeRequest has no problem-length cap; a very large 'problem' string could be sent to Groq. Consider truncating in server (e.g. first 4KB) as a light guard.",
+    "PreviewRequest wraps unstructured Dict[str, Any] for generator — consider a discriminated union model so mode/language/text/template/code are validated by Pydantic (currently only Generator() validates them at runtime and raises GenError)."
+  ],
+  "updated_files": ["/app/backend/tests/test_iteration9.py"],
+  "success_rate": {"backend": "100% (7/7)", "frontend": "100%"},
+  "test_credentials": "N/A (no auth)",
+  "seed_data_creation": "None",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "New backend test file /app/backend/tests/test_iteration9.py covers code-mode generator (python ok/error, cpp ok), code-mode end-to-end WA detection (StressRequest fields are userCode/userLang/bruteCode/bruteLang/numTests — flat, not nested user/brute objects), advanced chars/word/floats, simple 'list n floats', and /api/ai/explain-code. Run status payload uses summary.firstFail (an index) and tests[] array. Code editor is CodeMirror; lang selector data-testid is 'code-generator-editor-lang' (a native <select>). AI explain-code has 'ai-explain-code-btn' revealed only after ai-gen-solution-btn produces a solution."
+}

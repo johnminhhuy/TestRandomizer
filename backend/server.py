@@ -357,6 +357,35 @@ def generate_advanced(template: str, rng: random.Random) -> str:
             for _ in range(max(0, rows)):
                 out_lines.append(" ".join(str(rng.randint(lo, hi)) for _ in range(max(0, cols))))
             continue
+        if line.startswith("chars"):
+            args = call_args(line[5:])
+            if len(args) != 2:
+                raise GenError(f"chars() needs 2 args (count, charset): '{line}'")
+            count = _safe_eval(args[0], env)
+            cs = _resolve_charset(args[1].strip().strip('"\''))
+            out_lines.append(" ".join(rng.choice(cs) for _ in range(max(0, count))))
+            continue
+        if line.startswith("word"):
+            args = call_args(line[4:])
+            if len(args) != 2:
+                raise GenError(f"word() needs 2 args (length, charset): '{line}'")
+            length = _safe_eval(args[0], env)
+            cs = _resolve_charset(args[1].strip().strip('"\''))
+            out_lines.append("".join(rng.choice(cs) for _ in range(max(0, length))))
+            continue
+        if line.startswith("floats") or line.startswith("reals"):
+            head = 6 if line.startswith("floats") else 5
+            args = call_args(line[head:])
+            if len(args) not in (3, 4):
+                raise GenError(f"floats() needs 3-4 args (count, lo, hi[, decimals]): '{line}'")
+            count = _safe_eval(args[0], env)
+            lo = float(args[1])
+            hi = float(args[2])
+            if lo > hi:
+                raise GenError(f"floats(): lo>hi in '{line}'")
+            dec = max(0, min(_safe_eval(args[3], env) if len(args) == 4 else 2, 12))
+            out_lines.append(" ".join(f"{rng.uniform(lo, hi):.{dec}f}" for _ in range(max(0, count))))
+            continue
         raise GenError(f"Unknown statement: '{line}'")
 
     return "\n".join(out_lines) + "\n"
@@ -451,8 +480,16 @@ def generate_simple_text(template: str, rng: random.Random) -> str:
             elif kind in ("chars", "char", "letters"):
                 cs = _resolve_charset(right.strip())
                 out.append(" ".join(rng.choice(cs) for _ in range(count)))
+            elif kind in ("floats", "float", "reals", "decimals"):
+                if ".." not in right:
+                    raise GenError(f"floats range must be lo..hi — try: list {count_expr} floats in 0..1   (got: {line})")
+                lo_s, hi_s = right.strip().split("..", 1)
+                lo, hi = float(lo_s), float(hi_s)
+                if lo > hi:
+                    raise GenError(f"list range {lo}>{hi} in: {line}")
+                out.append(" ".join(f"{rng.uniform(lo, hi):.2f}" for _ in range(count)))
             else:
-                raise GenError(f"'list' must say 'ints' or 'chars' — got '{kind}' in: {line}")
+                raise GenError(f"'list' must say 'ints', 'floats' or 'chars' — got '{kind}' in: {line}")
         elif line.startswith("word "):
             body = line[5:].strip()
             if " in " not in body:
@@ -572,6 +609,54 @@ def normalize_tokens(s: str) -> List[str]:
     return s.split()
 
 
+# ----------------------------- Generator provider -----------------------------
+GEN_TIME_MS = 8000
+GEN_MEM_MB = 512
+
+
+class Generator:
+    """Produces test inputs from any generator mode (simple / advanced / code)."""
+
+    def __init__(self, gen: Dict[str, Any]):
+        self.gen = gen
+        self.mode = gen.get("mode", "simple")
+        self.workdir = None
+        self.run_cmd = None
+        if self.mode == "code":
+            code = gen.get("code", "")
+            lang = gen.get("language", "python")
+            if lang not in LANGS:
+                raise GenError(f"Unsupported generator language '{lang}'")
+            if not code.strip():
+                raise GenError("Generator code is empty")
+            self.workdir = tempfile.mkdtemp(prefix="cpgen_")
+            ok, msg = compile_source(lang, code, self.workdir)
+            if not ok:
+                raise GenError("Generator failed to compile:\n" + msg)
+            self.run_cmd = get_run_cmd(lang, GEN_MEM_MB)
+
+    def sample(self, seed: int) -> str:
+        if self.mode == "code":
+            res = execute(self.run_cmd + [str(seed)], "", GEN_TIME_MS, GEN_MEM_MB, self.workdir)
+            if res["timed_out"]:
+                raise GenError("Generator timed out (took too long to print a test)")
+            if res.get("mle"):
+                raise GenError("Generator exceeded memory")
+            if res["rc"] != 0:
+                raise GenError("Generator crashed:\n" + (res["stderr"][:800] or f"exit code {res['rc']}"))
+            return res["stdout"]
+        rng = random.Random(seed)
+        if self.mode == "advanced":
+            return generate_advanced(self.gen.get("template", ""), rng)
+        if "text" in self.gen:
+            return generate_simple_text(self.gen.get("text", ""), rng)
+        return generate_simple(self.gen, rng)
+
+    def close(self):
+        if self.workdir:
+            shutil.rmtree(self.workdir, ignore_errors=True)
+
+
 # ----------------------------- Models -----------------------------
 class StressRequest(BaseModel):
     userCode: str
@@ -603,16 +688,20 @@ async def languages():
 
 
 @api_router.post("/preview")
-async def preview(req: PreviewRequest):
+def preview(req: PreviewRequest):
+    seed = req.seed if req.seed is not None else random.randrange(1 << 30)
+    gen = None
     try:
-        rng = random.Random(req.seed if req.seed is not None else random.randrange(1 << 30))
-        make = build_generator(req.generator)
-        sample = make(rng)
+        gen = Generator(req.generator)
+        sample = gen.sample(seed)
         return {"ok": True, "input": sample}
     except GenError as e:
         return {"ok": False, "error": str(e)}
     except Exception as e:
         return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+    finally:
+        if gen:
+            gen.close()
 
 
 def _verdict_for(res, tl_ms, mem_mb):
@@ -667,10 +756,11 @@ def _run_job(job: Dict[str, Any], req: "StressRequest"):
     os.makedirs(user_dir)
     os.makedirs(brute_dir)
     pool = ThreadPoolExecutor(max_workers=2)
+    gen_obj = None
     try:
         try:
-            make = build_generator(req.generator)
-            make(random.Random(12345))
+            gen_obj = Generator(req.generator)
+            gen_obj.sample(12345)
         except GenError as e:
             job["status"] = "GEN_ERROR"
             job["message"] = str(e)
@@ -714,7 +804,7 @@ def _run_job(job: Dict[str, Any], req: "StressRequest"):
 
             test_seed = rng.randrange(1 << 30)
             try:
-                inp = make(random.Random(test_seed))
+                inp = gen_obj.sample(test_seed)
             except GenError as e:
                 job["status"] = "GEN_ERROR"
                 job["message"] = str(e)
@@ -785,6 +875,8 @@ def _run_job(job: Dict[str, Any], req: "StressRequest"):
     finally:
         pool.shutdown(wait=False, cancel_futures=True)
         shutil.rmtree(base, ignore_errors=True)
+        if gen_obj:
+            gen_obj.close()
 
 
 @api_router.post("/run/start")
@@ -982,6 +1074,43 @@ def ai_explain(req: AIExplainRequest):
             "Explain the bug and give a hint.")
     data = groq_json(EXPLAIN_SYSTEM, user, max_tokens=1500)
     return {"diagnosis": data.get("diagnosis", ""), "hint": data.get("hint", "")}
+
+
+EXPLAIN_CODE_SYSTEM = """You are a patient competitive-programming teacher. You are given a solution's source code (and optionally the problem it solves). Produce a DETAILED but clear explanation of how the code works, aimed at a learner.
+Return ONLY a single JSON object with these fields:
+{
+  "approach": "<the overall idea / algorithm in 2-4 sentences>",
+  "steps": ["<step 1 of what the code does>", "<step 2>", "..."],
+  "complexity": "<time and space complexity, e.g. O(n log n) time, O(n) space, with a short why>",
+  "edgeCases": "<edge cases the code handles or should watch out for, 1-3 sentences>"
+}
+Be specific to THIS code — reference its actual variables, loops and logic. Keep each steps[] item to one concise sentence."""
+
+
+class AIExplainCodeRequest(BaseModel):
+    code: str
+    language: str = "cpp"
+    problem: Optional[str] = ""
+
+
+@api_router.post("/ai/explain-code")
+def ai_explain_code(req: AIExplainCodeRequest):
+    if not req.code.strip():
+        raise HTTPException(status_code=400, detail="No code provided")
+    prob = f"Problem it solves:\n{req.problem}\n\n" if (req.problem or "").strip() else ""
+    user = (f"{prob}Language: {req.language}\n\n"
+            f"Source code:\n```\n{req.code}\n```\n\n"
+            "Explain in detail how this code works.")
+    data = groq_json(EXPLAIN_CODE_SYSTEM, user, max_tokens=2500)
+    steps = data.get("steps", [])
+    if isinstance(steps, str):
+        steps = [steps]
+    return {
+        "approach": data.get("approach", ""),
+        "steps": steps,
+        "complexity": data.get("complexity", ""),
+        "edgeCases": data.get("edgeCases", ""),
+    }
 
 
 app.include_router(api_router)

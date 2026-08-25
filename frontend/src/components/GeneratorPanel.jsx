@@ -1,8 +1,9 @@
 import React, { useState } from "react";
 import { Eye, BookOpen, CaretDown } from "@phosphor-icons/react";
 import { previewGenerator } from "../lib/apiClient";
-import { SIMPLE_PRESETS, ADVANCED_PRESETS } from "../lib/constants";
+import { SIMPLE_PRESETS, ADVANCED_PRESETS, CODE_PRESETS } from "../lib/constants";
 import { TemplateEditor } from "./TemplateEditor";
+import { CodeEditor } from "./CodeEditor";
 import { toast } from "sonner";
 
 const SIMPLE_GUIDE = [
@@ -10,10 +11,10 @@ const SIMPLE_GUIDE = [
   { code: "print n", desc: "write one line with these values (e.g. print a b)" },
   { code: "list n ints in 1..20", desc: "n random integers on one line" },
   { code: "list n distinct ints in 1..50", desc: "…with no repeats" },
+  { code: "list n floats in 0..1", desc: "n random decimals on one line" },
   { code: "list n chars in a-z", desc: "n random letters on one line" },
   { code: "word 5 in a-z", desc: "one random string of length 5" },
   { code: "text YES", desc: "a fixed line of text" },
-  { code: "# ...", desc: "a comment (ignored)" },
 ];
 
 const ADVANCED_GUIDE = [
@@ -21,8 +22,17 @@ const ADVANCED_GUIDE = [
   { code: "print(n, m)", desc: "print values space-separated on one line" },
   { code: "array(count, lo, hi)", desc: "one line of `count` random ints" },
   { code: "grid(rows, cols, lo, hi)", desc: "rows lines × cols ints — matrices & edge lists" },
+  { code: "chars(count, a-z)", desc: "one line of `count` random characters" },
+  { code: "word(len, a-z)", desc: "one random string of the given length" },
+  { code: "floats(count, lo, hi, dec)", desc: "random decimals (dec = decimal places)" },
   { code: "blank", desc: "an empty line" },
-  { code: "# ...", desc: "a comment. Note: advanced mode is integer-only" },
+];
+
+const CODE_GUIDE = [
+  { code: "print(...)", desc: "write your test case straight to stdout — full freedom" },
+  { code: "seed = argv[1]", desc: "the random seed arrives as the 1st command-line arg" },
+  { code: "random.seed(seed)", desc: "seed your RNG with it so every test differs" },
+  { code: "any language", desc: "Python / C++ / Java — code any algorithm you want" },
 ];
 
 const Guide = ({ items, testid }) => {
@@ -58,7 +68,7 @@ const Presets = ({ presets, onPick, active, keyName }) => (
       <button
         key={p.id}
         data-testid={`preset-${p.id}`}
-        onClick={() => onPick(p[keyName])}
+        onClick={() => onPick(p[keyName], p)}
         className={`text-[11px] px-2.5 py-1 rounded-sm border transition-colors ${
           active === p[keyName]
             ? "bg-[#007AFF] border-[#007AFF] text-white"
@@ -71,15 +81,19 @@ const Presets = ({ presets, onPick, active, keyName }) => (
   </div>
 );
 
-export const GeneratorPanel = ({ mode, setMode, simpleText, setSimpleText, template, setTemplate }) => {
+export const GeneratorPanel = ({
+  mode, setMode, simpleText, setSimpleText, template, setTemplate,
+  genCode, setGenCode, genLang, setGenLang,
+}) => {
   const [preview, setPreview] = useState("");
   const [previewErr, setPreviewErr] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const buildGenerator = () =>
-    mode === "simple"
-      ? { mode: "simple", text: simpleText }
-      : { mode: "advanced", template };
+  const buildGenerator = () => {
+    if (mode === "simple") return { mode: "simple", text: simpleText };
+    if (mode === "advanced") return { mode: "advanced", template };
+    return { mode: "code", language: genLang, code: genCode };
+  };
 
   const doPreview = async () => {
     setLoading(true);
@@ -101,6 +115,7 @@ export const GeneratorPanel = ({ mode, setMode, simpleText, setSimpleText, templ
   };
 
   const isSimple = mode === "simple";
+  const isCode = mode === "code";
   const value = isSimple ? simpleText : template;
   const setValue = isSimple ? setSimpleText : setTemplate;
 
@@ -110,6 +125,7 @@ export const GeneratorPanel = ({ mode, setMode, simpleText, setSimpleText, templ
         {[
           { id: "simple", label: "Simple" },
           { id: "advanced", label: "Advanced" },
+          { id: "code", label: "Code" },
         ].map((t) => (
           <button
             key={t.id}
@@ -129,55 +145,82 @@ export const GeneratorPanel = ({ mode, setMode, simpleText, setSimpleText, templ
       <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-3">
         <div>
           <p className="font-display text-[10px] uppercase tracking-[0.2em] text-[#A3A3A3] mb-1.5">
-            {isSimple ? "Readable template" : "Advanced template"}
+            {isSimple ? "Readable template" : isCode ? "Custom generator program" : "Advanced template"}
           </p>
           <p className="text-[10px] text-[#525252] mb-2">
             {isSimple
               ? "Write your test in plain lines. Tap a preset to start."
-              : "Function-style generator with variables, math and grids."}
+              : isCode
+              ? "Code any algorithm to print a test. The seed comes in as argv[1]."
+              : "Function-style generator with variables, math, grids, chars, words & floats."}
           </p>
           <Presets
-            presets={isSimple ? SIMPLE_PRESETS : ADVANCED_PRESETS}
-            keyName={isSimple ? "text" : "template"}
-            active={value}
-            onPick={setValue}
+            presets={isSimple ? SIMPLE_PRESETS : isCode ? CODE_PRESETS : ADVANCED_PRESETS}
+            keyName={isSimple ? "text" : isCode ? "code" : "template"}
+            active={isCode ? genCode : value}
+            onPick={(picked, preset) => {
+              if (isCode) {
+                setGenCode(picked);
+                if (preset?.lang) setGenLang(preset.lang);
+              } else {
+                setValue(picked);
+              }
+            }}
           />
         </div>
 
-        <TemplateEditor
-          mode={mode}
-          value={value}
-          onChange={setValue}
-          testid={isSimple ? "simple-template" : "advanced-template"}
-        />
+        {isCode ? (
+          <div className="h-72">
+            <CodeEditor
+              title="Generator program"
+              testid="code-generator-editor"
+              lang={genLang}
+              onLangChange={setGenLang}
+              value={genCode}
+              onChange={setGenCode}
+            />
+          </div>
+        ) : (
+          <TemplateEditor
+            mode={mode}
+            value={value}
+            onChange={setValue}
+            testid={isSimple ? "simple-template" : "advanced-template"}
+          />
+        )}
 
         <Guide
-          items={isSimple ? SIMPLE_GUIDE : ADVANCED_GUIDE}
-          testid={isSimple ? "simple-guide" : "advanced-guide"}
+          items={isSimple ? SIMPLE_GUIDE : isCode ? CODE_GUIDE : ADVANCED_GUIDE}
+          testid={isSimple ? "simple-guide" : isCode ? "code-guide" : "advanced-guide"}
         />
       </div>
 
-      <div className="border-t border-[#262626] shrink-0">
-        <div className="flex items-center justify-between px-4 h-9">
-          <span className="font-display text-[10px] uppercase tracking-[0.2em] text-[#A3A3A3]">
-            Preview
+      {/* Preview — highlighted result card */}
+      <div className="border-t-2 border-[#007AFF]/40 bg-[#0a1420] shrink-0">
+        <div className="flex items-center justify-between px-4 h-10">
+          <span className="flex items-center gap-1.5 font-display text-[11px] uppercase tracking-[0.2em] text-[#4da3ff]">
+            <Eye size={14} weight="fill" /> Preview
           </span>
           <button
             data-testid="preview-btn"
             onClick={doPreview}
             disabled={loading}
-            className="flex items-center gap-1 text-[11px] text-[#007AFF] hover:text-white disabled:opacity-40"
+            className="flex items-center gap-1.5 bg-[#007AFF] hover:bg-white hover:text-[#050505] text-white font-display font-bold uppercase tracking-widest text-[10px] px-3 h-7 rounded-sm transition-colors disabled:opacity-40"
           >
-            <Eye size={13} /> {loading ? "..." : "generate"}
+            <Eye size={13} /> {loading ? "generating..." : "generate sample"}
           </button>
         </div>
         <pre
           data-testid="preview-output"
-          className={`px-4 pb-3 max-h-28 overflow-auto text-xs font-mono whitespace-pre-wrap ${
-            previewErr ? "text-[#EF4444]" : "text-[#22C55E]"
+          className={`mx-4 mb-4 p-3 rounded-sm border min-h-[64px] max-h-44 overflow-auto text-[13px] font-mono whitespace-pre-wrap ${
+            previewErr
+              ? "text-[#ff8a8a] border-[#EF4444]/40 bg-[#1a0d0d]"
+              : preview
+              ? "text-[#7ef0a0] border-[#22C55E]/30 bg-[#0a1a0f]"
+              : "text-[#607089] border-[#1f3350] bg-[#0a1420]"
           }`}
         >
-          {previewErr || preview || "click generate to preview a test case"}
+          {previewErr || preview || "▶  Click “generate sample” to see a random test case here."}
         </pre>
       </div>
     </div>

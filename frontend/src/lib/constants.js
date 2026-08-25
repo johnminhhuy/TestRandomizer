@@ -62,6 +62,58 @@ export const ADVANCED_PRESETS = [
   { id: "two", label: "Two numbers", template: `a = int(1, 100)\nb = int(1, 100)\nprint(a, b)` },
 ];
 
+export const DEFAULT_GENERATOR_CODE = `import sys, random
+# Write a program that PRINTS one random test to stdout.
+# The seed is passed as the first argument (argv[1]) so each test differs.
+random.seed(int(sys.argv[1]))
+
+n = random.randint(1, 8)
+print(n)
+print(*[random.randint(1, 20) for _ in range(n)])`;
+
+export const CODE_PRESETS = [
+  {
+    id: "py",
+    label: "Python",
+    lang: "python",
+    code: `import sys, random
+random.seed(int(sys.argv[1]))
+
+n = random.randint(1, 8)
+print(n)
+print(*[random.randint(1, 20) for _ in range(n)])`,
+  },
+  {
+    id: "cpp",
+    label: "C++",
+    lang: "cpp",
+    code: `#include <bits/stdc++.h>
+using namespace std;
+int main(int argc, char** argv){
+    srand(atoi(argv[1]));
+    int n = rand() % 8 + 1;
+    printf("%d\\n", n);
+    for (int i = 0; i < n; i++) printf("%d ", rand() % 20 + 1);
+    printf("\\n");
+}`,
+  },
+  {
+    id: "java",
+    label: "Java",
+    lang: "java",
+    code: `import java.util.*;
+public class Main {
+    public static void main(String[] a) {
+        Random r = new Random(Long.parseLong(a[0]));
+        int n = r.nextInt(8) + 1;
+        StringBuilder sb = new StringBuilder().append(n).append("\\n");
+        for (int i = 0; i < n; i++) sb.append(r.nextInt(20) + 1).append(" ");
+        System.out.println(sb.toString().trim());
+    }
+}`,
+  },
+];
+
 export const DEFAULT_SIMPLE = {
   mode: "simple",
   variables: [{ name: "n", type: "int", min: "1", max: "8" }],

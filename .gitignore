@@ -86,3 +86,9 @@ frontend/node_modules/.cache/default-development/6.pack
 # AI runtime config (may contain user API key)
 backend/.ai_config.json
 .ai_config.json
+.env
+.env.*
+*.env
+credentials.json
+*.key
+.credentials

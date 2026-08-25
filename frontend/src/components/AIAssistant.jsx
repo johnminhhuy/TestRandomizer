@@ -6,8 +6,8 @@ import {
   SheetTitle,
   SheetDescription,
 } from "./ui/sheet";
-import { Sparkle, Code, Flask, CircleNotch, Key, CaretDown, CheckCircle } from "@phosphor-icons/react";
-import { aiGenerateSolution, aiGenerateGenerator, aiStatus, aiSetConfig } from "../lib/apiClient";
+import { Sparkle, Code, Flask, CircleNotch, Key, CaretDown, CheckCircle, BookOpen, ListNumbers } from "@phosphor-icons/react";
+import { aiGenerateSolution, aiGenerateGenerator, aiStatus, aiSetConfig, aiExplainCode } from "../lib/apiClient";
 import { toast } from "sonner";
 
 const MODELS = [
@@ -166,6 +166,9 @@ export const AIAssistant = ({
   const [loadingSol, setLoadingSol] = useState(false);
   const [loadingGen, setLoadingGen] = useState(false);
   const [lastNote, setLastNote] = useState("");
+  const [lastSolution, setLastSolution] = useState(null);
+  const [codeExplain, setCodeExplain] = useState(null);
+  const [loadingExplain, setLoadingExplain] = useState(false);
 
   const guardProblem = () => {
     if (!problem.trim()) {
@@ -179,6 +182,7 @@ export const AIAssistant = ({
     if (!guardProblem()) return;
     setLoadingSol(true);
     setLastNote("");
+    setCodeExplain(null);
     try {
       const res = await aiGenerateSolution(problem, solLang);
       if (solTarget === "brute") {
@@ -189,11 +193,29 @@ export const AIAssistant = ({
         setUserLang(res.language);
       }
       setLastNote(res.explanation || "Solution generated.");
+      setLastSolution({ code: res.code, language: res.language });
       toast.success(`Reference solution added to ${solTarget === "brute" ? "Correct" : "Your"} editor`);
     } catch (e) {
       toast.error("AI failed", { description: e?.response?.data?.detail || e.message });
     } finally {
       setLoadingSol(false);
+    }
+  };
+
+  const onExplainCode = async () => {
+    if (!lastSolution) return;
+    setLoadingExplain(true);
+    try {
+      const res = await aiExplainCode({
+        code: lastSolution.code,
+        language: lastSolution.language,
+        problem: problem || "",
+      });
+      setCodeExplain(res);
+    } catch (e) {
+      toast.error("AI failed", { description: e?.response?.data?.detail || e.message });
+    } finally {
+      setLoadingExplain(false);
     }
   };
 
@@ -291,6 +313,55 @@ export const AIAssistant = ({
               {loadingSol ? <CircleNotch size={16} className="animate-spin" /> : <Code size={16} />}
               {loadingSol ? "Writing..." : "Generate Solution"}
             </button>
+
+            {lastSolution && (
+              <>
+                <button
+                  data-testid="ai-explain-code-btn"
+                  onClick={onExplainCode}
+                  disabled={loadingExplain}
+                  className="w-full flex items-center justify-center gap-2 border border-[#22C55E]/50 text-[#22C55E] hover:bg-[#22C55E] hover:text-[#050505] font-display font-bold uppercase tracking-widest text-[11px] px-3 h-9 rounded-sm transition-colors disabled:opacity-40"
+                >
+                  {loadingExplain ? <CircleNotch size={14} className="animate-spin" /> : <BookOpen size={14} />}
+                  {loadingExplain ? "Explaining..." : "Explain this code in detail"}
+                </button>
+                {codeExplain && (
+                  <div data-testid="ai-code-explanation" className="space-y-2.5 pt-1">
+                    <div>
+                      <div className="text-[10px] uppercase tracking-widest text-[#4da3ff] mb-1">Approach</div>
+                      <p className="text-xs text-[#cfe4ff] leading-relaxed">{codeExplain.approach}</p>
+                    </div>
+                    {codeExplain.steps?.length > 0 && (
+                      <div>
+                        <div className="flex items-center gap-1 text-[10px] uppercase tracking-widest text-[#A3A3A3] mb-1">
+                          <ListNumbers size={12} /> Step by step
+                        </div>
+                        <ol className="space-y-1">
+                          {codeExplain.steps.map((s, i) => (
+                            <li key={i} className="flex gap-2 text-xs text-[#e5e5e5] leading-relaxed">
+                              <span className="text-[#22C55E] font-mono">{i + 1}.</span>
+                              <span>{s}</span>
+                            </li>
+                          ))}
+                        </ol>
+                      </div>
+                    )}
+                    {codeExplain.complexity && (
+                      <div>
+                        <div className="text-[10px] uppercase tracking-widest text-[#EAB308] mb-1">Complexity</div>
+                        <p className="text-xs text-[#f0e6c9] font-mono leading-relaxed">{codeExplain.complexity}</p>
+                      </div>
+                    )}
+                    {codeExplain.edgeCases && (
+                      <div>
+                        <div className="text-[10px] uppercase tracking-widest text-[#D946EF] mb-1">Edge cases</div>
+                        <p className="text-xs text-[#f3d9f7] leading-relaxed">{codeExplain.edgeCases}</p>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </>
+            )}
           </div>
 
           {/* Generator generation */}

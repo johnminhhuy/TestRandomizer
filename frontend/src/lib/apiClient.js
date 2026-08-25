@@ -54,3 +54,8 @@ export const aiExplain = async (payload) => {
   const { data } = await api.post("/ai/explain", payload);
   return data;
 };
+
+export const aiExplainCode = async (payload) => {
+  const { data } = await api.post("/ai/explain-code", payload);
+  return data;
+};

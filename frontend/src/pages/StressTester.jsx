@@ -10,6 +10,7 @@ import {
   DEFAULT_BRUTE_CPP,
   DEFAULT_SIMPLE_TEXT,
   DEFAULT_ADVANCED_TEMPLATE,
+  DEFAULT_GENERATOR_CODE,
 } from "../lib/constants";
 import { Play, Lightning, StopCircle, GearSix, Sparkle } from "@phosphor-icons/react";
 import { toast } from "sonner";
@@ -26,6 +27,8 @@ export default function StressTester() {
   const [mode, setMode] = useState("simple");
   const [simpleText, setSimpleText] = useState(DEFAULT_SIMPLE_TEXT);
   const [template, setTemplate] = useState(DEFAULT_ADVANCED_TEMPLATE);
+  const [genCode, setGenCode] = useState(DEFAULT_GENERATOR_CODE);
+  const [genLang, setGenLang] = useState("python");
 
   const [numTests, setNumTests] = useState(30);
   const [timeLimitMs, setTimeLimitMs] = useState(2000);
@@ -43,8 +46,11 @@ export default function StressTester() {
   const pollRef = useRef(null);
   const cancelledRef = useRef(false);
 
-  const generator = () =>
-    mode === "simple" ? { mode: "simple", text: simpleText } : { mode: "advanced", template };
+  const generator = () => {
+    if (mode === "simple") return { mode: "simple", text: simpleText };
+    if (mode === "advanced") return { mode: "advanced", template };
+    return { mode: "code", language: genLang, code: genCode };
+  };
 
   const poll = async () => {
     try {
@@ -226,6 +232,10 @@ export default function StressTester() {
             setSimpleText={setSimpleText}
             template={template}
             setTemplate={setTemplate}
+            genCode={genCode}
+            setGenCode={setGenCode}
+            genLang={genLang}
+            setGenLang={setGenLang}
           />
         </div>
 
