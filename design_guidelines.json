@@ -1,0 +1,97 @@
+{
+  "theme": "dark",
+  "typography": {
+    "headings": "Chivo",
+    "body": "IBM Plex Sans",
+    "mono": "JetBrains Mono",
+    "rules": [
+      "Use tight letter spacing for headings.",
+      "Never use Inter for headings.",
+      "Use uppercase + wide spacing for overlines and small labels.",
+      "Font weights should be radical (e.g., Light 300 or Black 900) to create tension."
+    ]
+  },
+  "colors": {
+    "archetype": "Swiss & High-Contrast (Dark Variant)",
+    "base": {
+      "background": "#050505",
+      "surface": "#121212",
+      "surface_hover": "#1E1E1E",
+      "border": "#262626"
+    },
+    "text": {
+      "primary": "#FFFFFF",
+      "secondary": "#A3A3A3",
+      "disabled": "#525252"
+    },
+    "accents": {
+      "primary": "#007AFF",
+      "primary_text": "#FFFFFF",
+      "secondary": "#FF3B30"
+    },
+    "verdicts": {
+      "AC": "#22C55E",
+      "WA": "#EF4444",
+      "TLE": "#EAB308",
+      "RTE": "#D946EF",
+      "CE": "#06B6D4",
+      "MLE": "#F97316"
+    },
+    "forbidden": [
+      "#7351B7",
+      "#1B93A4"
+    ]
+  },
+  "visual_enhancers": {
+    "surfaces": "Grid Borders (The Technical Look). Expose the skeleton. High density, no soft shadows, 1px solid borders.",
+    "borders": "border-collapse style layout. Very subtle rounded edges (max 4px) or completely sharp.",
+    "effects": "Subtle glow on active elements using drop-shadow, no glassmorphism on main grid to maintain clarity.",
+    "micro_themes": "Retro-Futurism touches for the terminal view (results detail), keeping the main editor crisp and distraction-free."
+  },
+  "layouts": {
+    "strategy": "Mode B: High Density Grid",
+    "spacing": "Dense but intentional. Use p-4 to p-6 inside panels. gap-px (1px) between grid panels to form a solid border grid.",
+    "structure": [
+      "Full viewport height (h-screen) with overflow-hidden on body. Internal panels MUST scroll independently (overflow-y-auto).",
+      "Desktop Grid: grid-cols-1 md:grid-cols-12 h-screen.",
+      "Left Panel (col-span-3): Test Data Generator (Tabs for Simple/Advanced), Config.",
+      "Middle Panel (col-span-5): Code Editors (Your Solution, Correct Solution stacked vertically using flex-col h-full).",
+      "Right Panel (col-span-4): Results Dashboard & Diff Viewer."
+    ]
+  },
+  "components": {
+    "buttons": "Sharp edges (rounded-none or rounded-sm), flat background. Primary action 'Run Stress Test' should be high contrast. Hover states lift slightly or invert colors.",
+    "tabs": "Minimalist. Text color changes, 1px bottom border highlights active state.",
+    "code_editor": "Use Monaco Editor or CodeMirror with a dark theme (vs-dark equivalent). Syntax highlighting is mandatory. Integrated language selector in the editor header.",
+    "diff_viewer": "Side-by-side or unified inline diff. Uses muted red/green backgrounds for deletions/additions (bg-red-500/10, bg-green-500/10) with text highlight.",
+    "verdict_badges": "Small pill-shaped or sharp rectangular tags with solid background 15% opacity and bright colored text/border.",
+    "forms": "Use Shadcn components but override borders to be sharp. Input background should match surface color."
+  },
+  "motion": {
+    "rules": [
+      "Respect prefers-reduced-motion.",
+      "Instant transitions for most dashboard elements (snappy feel).",
+      "Subtle fade for diff renders and tab switching.",
+      "Micro-animations on buttons (e.g. scale down 0.98 on active)."
+    ]
+  },
+  "accessibility": {
+    "contrast": "Ensure minimum 4.5:1 ratio. Code editors must use highly accessible syntax themes.",
+    "focus": "Focus states must use a 2px solid ring matching the primary accent color."
+  },
+  "instructions_to_main_agent": {
+    "ui_library": "Use shadcn/ui but heavily customize it. Strip away soft shadows and apply sharp, technical, dark-mode borders.",
+    "icons": "Use @phosphor-icons/react for a technical, crisp look. Ensure it is installed.",
+    "data_testid": "MANDATORY: Add data-testid to all interactive elements (e.g., 'run-stress-test-btn', 'language-select', 'verdict-badge').",
+    "structure": "Create independent scrolling columns. Use CSS grid with 1px gap and bg-border to create the grid line effect naturally."
+  },
+  "UNIVERSAL_GUIDELINES_FOR_MAIN_AGENT": [
+    "Do not apply global transition: all.",
+    "Never center align the app container (.App { text-align: center; } is BANNED).",
+    "Always apply explicit hover states with text and background color changes.",
+    "Ensure dark colors are used independently without muddy gradients.",
+    "Create depth through 1px sharp borders and z-index, not soft drop shadows.",
+    "Toasts must use sonner.",
+    "No placeholder URLs for any images."
+  ]
+}

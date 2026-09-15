@@ -1,0 +1,26 @@
+{
+  "summary": "Iteration 2 focused on NEW job-based endpoints, typed variables in Simple generator, distinct array constraint, live progress/streaming, cancel behavior, and full verdict regression via /api/run/start + /api/run/status + /api/run/cancel. Backend: 14/14 pytest passing. Frontend Playwright: default C++ WA flow via job endpoints works — Run button toggles to red Cancel, run-progress bar visible, WA banner shown on completion, clicking test-row-1 reveals Input/Expected/Your Output diff. Typed var UI switches constraint fields correctly (int→min/max, float→min/max/decimals, char→charset, string→charset+len). Distinct checkbox on int array line rendered. Advanced generator preview works. Cancel while running stops the job and shows 'Cancelled · N test(s) run' banner; done < total confirmed (122/150 in one run). All 6 verdict types (CPP-WA, PY-AC, JAVA-AC, CE, TLE, RTE, MLE) confirmed via job endpoints.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_stress_jobs.py",
+    "/app/backend/tests/test_stress_api.py",
+    "/app/test_reports/pytest/pytest_results_iter2.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py _run_job has a hard-coded 110s deadline (`deadline = time.monotonic() + 110`) which will silently cut off legitimate long runs; consider deriving from numTests*timeLimit or exposing as config.",
+    "In-memory JOBS dict with 600s TTL + global lock is fine for single-instance, but not shared across workers. Not a bug for current single-process supervisor setup; document if scaling.",
+    "execute() polling interval is 4ms which is aggressive; under many concurrent jobs this could burn CPU. Consider adaptive back-off (e.g., 5ms early, 20ms after 100ms).",
+    "Cancellation kills the child via cancel_event → proc.kill(), but reference solution runs on a separate thread pool worker; on cancel the ref future is still awaited (f_ref.result() blocks). It works because cancel_event triggers kill inside execute(), but a `future.cancel()` isn't attempted — acceptable.",
+    "/api/run/cancel returns 200 even if job is already terminal (idempotent). Good.",
+    "No auth/rate-limit on job endpoints; arbitrary code exec is inherent to product. Consider a global semaphore to bound concurrent jobs."
+  ],
+  "updated_files": ["/app/backend/tests/test_stress_jobs.py"],
+  "success_rate": {"backend": "100% (14/14 new + previous 12/12 remain valid)", "frontend": "100% (all critical flows: WA banner, diff panel, run→cancel toggle, run-progress, typed var constraints, distinct checkbox, advanced preview, cancel banner)"},
+  "seed_data_creation": "None – stateless app.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "test_stress_jobs.py covers NEW endpoints /api/run/start, /api/run/status/{id}, /api/run/cancel/{id}, typed generator (int/float/char/string), distinct array (ok + range-too-small error), streaming/progress via polling, and full verdict matrix. Legacy test_stress_api.py covers sync /api/run for regression. UI text uses CSS uppercase; use case-insensitive matches when asserting banner text.",
+  "rca of the issue": "N/A – no defects."
+}
